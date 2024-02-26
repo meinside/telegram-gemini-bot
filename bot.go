@@ -279,7 +279,7 @@ func chatMessagesFromTGMessage(bot *tg.Bot, message tg.Message) (chatMessages []
 }
 
 // send given text to the chat
-func sendMessage(bot *tg.Bot, conf config, message string, chatID int64, messageID *int64) bool {
+func sendMessage(bot *tg.Bot, conf config, message string, chatID int64, messageID *int64) (err error) {
 	_ = bot.SendChatAction(chatID, tg.ChatActionTyping, nil)
 
 	if conf.Verbose {
@@ -293,17 +293,15 @@ func sendMessage(bot *tg.Bot, conf config, message string, chatID int64, message
 			MessageID: *messageID,
 		})
 	}
-	if res := bot.SendMessage(chatID, message, options); res.Ok {
-		return true
-	} else {
-		log.Printf("failed to send message: %s (requested message: %s)", *res.Description, message)
+	if res := bot.SendMessage(chatID, message, options); !res.Ok {
+		err = fmt.Errorf("failed to send message: %s (requested message: %s)", *res.Description, message)
 	}
 
-	return false
+	return err
 }
 
 // send given blob data as a document to the chat
-func sendFile(bot *tg.Bot, conf config, data []byte, chatID int64, messageID *int64, caption *string) bool {
+func sendFile(bot *tg.Bot, conf config, data []byte, chatID int64, messageID *int64, caption *string) (err error) {
 	_ = bot.SendChatAction(chatID, tg.ChatActionTyping, nil)
 
 	if conf.Verbose {
@@ -319,14 +317,11 @@ func sendFile(bot *tg.Bot, conf config, data []byte, chatID int64, messageID *in
 	if caption != nil {
 		options.SetCaption(*caption)
 	}
-
-	if res := bot.SendDocument(chatID, tg.InputFileFromBytes(data), options); res.Ok {
-		return true
-	} else {
-		log.Printf("failed to send document: %s", *res.Description)
+	if res := bot.SendDocument(chatID, tg.InputFileFromBytes(data), options); !res.Ok {
+		err = fmt.Errorf("failed to send document: %s", *res.Description)
 	}
 
-	return false
+	return err
 }
 
 func countTokens(ctx context.Context, model *genai.GenerativeModel, parts ...genai.Part) (count int32, err error) {
@@ -379,7 +374,7 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 				// if answer is too long for telegram api, send it as a text document
 				if len(generatedText) > 4096 {
 					caption := strings.ToValidUTF8(generatedText[:128], "") + "..."
-					if sendFile(bot, conf, []byte(generatedText), chatID, &messageID, &caption) {
+					if err := sendFile(bot, conf, []byte(generatedText), chatID, &messageID, &caption); err == nil {
 						numTokensInput, _ := countTokens(ctx, model, texts...)
 						numTokensOutput, _ := countTokens(ctx, model, parts...)
 
@@ -397,7 +392,7 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 						savePromptAndResult(db, chatID, userID, username, messagesToPrompt(messages), uint(numTokensInput), err.Error(), uint(numTokensOutput), false)
 					}
 				} else {
-					if sendMessage(bot, conf, generatedText, chatID, &messageID) {
+					if err := sendMessage(bot, conf, generatedText, chatID, &messageID); err == nil {
 						numTokensInput, _ := countTokens(ctx, model, texts...)
 						numTokensOutput, _ := countTokens(ctx, model, parts...)
 
@@ -417,7 +412,7 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 				}
 			} else if blob, ok := part.(genai.Blob); ok { // (blob)
 				caption := fmt.Sprintf("%d byte(s) of %s", len(blob.Data), blob.MIMEType)
-				if sendFile(bot, conf, blob.Data, chatID, &messageID, &caption) {
+				if err := sendFile(bot, conf, blob.Data, chatID, &messageID, &caption); err == nil {
 					numTokensInput, _ := countTokens(ctx, model, texts...)
 					numTokensOutput, _ := countTokens(ctx, model, parts...)
 
