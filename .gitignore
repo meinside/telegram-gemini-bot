@@ -1,0 +1,5 @@
+config.json
+telegram-gemini-bot
+
+*.db
+*.sqlite*

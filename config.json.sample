@@ -1,0 +1,10 @@
+{
+  "google_generative_model": "gemini-pro",
+
+  "allowed_telegram_users": ["user1", "user2"],
+  "db_filepath": null,
+  "verbose": false,
+
+  "telegram_bot_token": "123456:abcdefghijklmnop-QRSTUVWXYZ7890",
+  "google_ai_api_key": "ABCDEFGHIJK1234567890"
+}
