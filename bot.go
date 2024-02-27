@@ -24,7 +24,8 @@ import (
 )
 
 const (
-	generationModelDefault = "gemini-pro"
+	defaultGenerationModel = "gemini-pro"
+	defaultMultimodalModel = "gemini-pro-vision"
 )
 
 const (
@@ -46,6 +47,9 @@ const (
 
 <i>version: %s</i>
 `
+
+	defaultPromptForPhotos   = "Describe provided image(s)."
+	defaultPromptForDocument = "Describe provided document."
 )
 
 type chatMessageRole string
@@ -56,13 +60,15 @@ const (
 )
 
 type chatMessage struct {
-	role chatMessageRole
-	text string
+	role  chatMessageRole
+	text  string
+	files [][]byte
 }
 
 // config struct for loading a configuration file
 type config struct {
 	GoogleGenerativeModel string `json:"google_generative_model,omitempty"`
+	GoogleMultimodalModel string `json:"google_multimodal_model,omitempty"`
 
 	// configurations
 	AllowedTelegramUsers  []string `json:"allowed_telegram_users"`
@@ -121,7 +127,10 @@ func loadConfig(fpath string) (conf config, err error) {
 
 				// set default/fallback values
 				if conf.GoogleGenerativeModel == "" {
-					conf.GoogleGenerativeModel = generationModelDefault
+					conf.GoogleGenerativeModel = defaultGenerationModel
+				}
+				if conf.GoogleMultimodalModel == "" {
+					conf.GoogleMultimodalModel = defaultMultimodalModel
 				}
 			}
 		}
@@ -345,11 +354,26 @@ func countTokens(ctx context.Context, model *genai.GenerativeModel, parts ...gen
 
 // generate an answer to given message and send it to the chat
 func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config, db *Database, messages []chatMessage, chatID, userID int64, username string, messageID int64) {
+	multimodal := false
 	texts := []genai.Part{}
 	for _, message := range messages {
 		texts = append(texts, genai.Text(message.text))
+		for _, file := range message.files {
+			texts = append(texts, genai.Blob{
+				MIMEType: http.DetectContentType(file),
+				Data:     file,
+			})
+			multimodal = true
+		}
 	}
-	model := client.GenerativeModel(conf.GoogleGenerativeModel)
+
+	var model *genai.GenerativeModel
+	if multimodal {
+		model = client.GenerativeModel(conf.GoogleMultimodalModel)
+	} else {
+		model = client.GenerativeModel(conf.GoogleGenerativeModel)
+	}
+
 	if generated, err := model.GenerateContent(ctx, texts...); err == nil {
 		if conf.Verbose {
 			log.Printf("[verbose] %+v ===> %+v", messages, generated)
@@ -445,7 +469,7 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 	} else {
 		log.Printf("failed to create chat completion: %s", err)
 
-		_ = sendMessage(bot, conf, "Failed to generate an answer from Gemini. See the server logs for more information.", chatID, &messageID, true)
+		_ = sendMessage(bot, conf, fmt.Sprintf("Failed to generate an answer from Gemini: %s", err), chatID, &messageID, true)
 
 		// save to database (error)
 		savePromptAndResult(db, chatID, userID, username, messagesToPrompt(messages), 0, err.Error(), 0, false)
@@ -480,22 +504,53 @@ func repliedToMessage(message tg.Message) *tg.Message {
 }
 
 // convert given telegram bot message to an genai chat message,
-// nil if there was any error.
+//
+// return nil if there was any error.
 //
 // (if it was sent from bot, make it an assistant's message)
 func convertMessage(bot *tg.Bot, message tg.Message) *chatMessage {
 	if message.ViaBot != nil &&
 		message.ViaBot.IsBot {
-		if message.HasText() {
+		if message.HasPhoto() {
+			var text string
+			if message.HasCaption() {
+				text = *message.Caption
+			} else {
+				text = defaultPromptForPhotos
+			}
+
+			photos := [][]byte{}
+			for _, photo := range message.Photo {
+				if bytes, err := photoBytes(bot, &photo); err == nil {
+					photos = append(photos, bytes)
+				} else {
+					log.Printf("failed to read photo content for assistant message: %s", err)
+				}
+			}
+
+			return &chatMessage{
+				role:  chatMessageRoleAssistant,
+				text:  text,
+				files: photos,
+			}
+		} else if message.HasText() {
 			return &chatMessage{
 				role: chatMessageRoleAssistant,
 				text: *message.Text,
 			}
 		} else if message.HasDocument() {
-			if bytes, err := documentText(bot, message.Document); err == nil {
+			var text string
+			if message.HasCaption() {
+				text = *message.Caption
+			} else {
+				text = defaultPromptForDocument
+			}
+
+			if bytes, err := documentBytes(bot, message.Document); err == nil {
 				return &chatMessage{
-					role: chatMessageRoleAssistant,
-					text: strings.TrimSpace(strings.ToValidUTF8(string(bytes), "?")),
+					role:  chatMessageRoleAssistant,
+					text:  text,
+					files: [][]byte{bytes},
 				}
 			} else {
 				log.Printf("failed to read document content for assistant message: %s", err)
@@ -503,16 +558,46 @@ func convertMessage(bot *tg.Bot, message tg.Message) *chatMessage {
 		}
 	}
 
-	if message.HasText() {
+	if message.HasPhoto() {
+		var text string
+		if message.HasCaption() {
+			text = *message.Caption
+		} else {
+			text = defaultPromptForPhotos
+		}
+
+		photos := [][]byte{}
+		for _, photo := range message.Photo {
+			if bytes, err := photoBytes(bot, &photo); err == nil {
+				photos = append(photos, bytes)
+			} else {
+				log.Printf("failed to read photo content for user message: %s", err)
+			}
+		}
+
+		return &chatMessage{
+			role:  chatMessageRoleUser,
+			text:  text,
+			files: photos,
+		}
+	} else if message.HasText() {
 		return &chatMessage{
 			role: chatMessageRoleUser,
 			text: *message.Text,
 		}
 	} else if message.HasDocument() {
-		if bytes, err := documentText(bot, message.Document); err == nil {
+		var text string
+		if message.HasCaption() {
+			text = *message.Caption
+		} else {
+			text = defaultPromptForDocument
+		}
+
+		if bytes, err := documentBytes(bot, message.Document); err == nil {
 			return &chatMessage{
-				role: chatMessageRoleUser,
-				text: strings.TrimSpace(strings.ToValidUTF8(string(bytes), "?")),
+				role:  chatMessageRoleUser,
+				text:  text,
+				files: [][]byte{bytes},
 			}
 		} else {
 			log.Printf("failed to read document content for user message: %s", err)
@@ -522,8 +607,20 @@ func convertMessage(bot *tg.Bot, message tg.Message) *chatMessage {
 	return nil
 }
 
+// read bytes from given photo
+func photoBytes(bot *tg.Bot, photo *tg.PhotoSize) (result []byte, err error) {
+	if res := bot.GetFile(photo.FileID); !res.Ok {
+		err = fmt.Errorf("Failed to get photo: %s", *res.Description)
+	} else {
+		fileURL := bot.GetFileURL(*res.Result)
+		result, err = readFileContentAtURL(fileURL)
+	}
+
+	return result, err
+}
+
 // read bytes from given document
-func documentText(bot *tg.Bot, document *tg.Document) (result []byte, err error) {
+func documentBytes(bot *tg.Bot, document *tg.Document) (result []byte, err error) {
 	if res := bot.GetFile(document.FileID); !res.Ok {
 		err = fmt.Errorf("Failed to get document: %s", *res.Description)
 	} else {
@@ -560,7 +657,11 @@ func messagesToPrompt(messages []chatMessage) string {
 	lines := []string{}
 
 	for _, message := range messages {
-		lines = append(lines, fmt.Sprintf("[%s] %s", message.role, message.text))
+		if len(message.files) > 0 {
+			lines = append(lines, fmt.Sprintf("[%s] %s (%d file(s))", message.role, message.text, len(message.files)))
+		} else {
+			lines = append(lines, fmt.Sprintf("[%s] %s", message.role, message.text))
+		}
 	}
 
 	return strings.Join(lines, "\n--------\n")

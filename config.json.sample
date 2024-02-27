@@ -1,5 +1,6 @@
 {
   "google_generative_model": "gemini-pro",
+  "google_multimodal_model": "gemini-pro-vision",
 
   "allowed_telegram_users": ["user1", "user2"],
   "db_filepath": null,
