@@ -243,23 +243,27 @@ func handleMessage(ctx context.Context, bot *tg.Bot, client *genai.Client, conf 
 	userID := message.From.ID
 	messageID := message.MessageID
 
-	messages := chatMessagesFromTGMessage(bot, message)
-	if len(messages) > 0 {
-		answer(ctx, bot, client, conf, db, messages, chatID, userID, userNameFromUpdate(update), messageID)
-	} else {
-		log.Printf("no converted chat messages from update: %+v", update)
+	if msg := usableMessageFromUpdate(update); msg != nil {
+		messages := chatMessagesFromTGMessage(bot, *msg)
+		if len(messages) > 0 {
+			answer(ctx, bot, client, conf, db, messages, chatID, userID, userNameFromUpdate(update), messageID)
 
-		_ = sendMessage(bot, conf, "Failed to get usable chat messages from your input. See the server logs for more information.", chatID, &messageID, true)
+			return
+		} else {
+			log.Printf("no converted chat messages from update: %+v", update)
+		}
+	} else {
+		log.Printf("no usable message from update: %+v", update)
 	}
+
+	_ = sendMessage(bot, conf, "Failed to get usable chat messages from your input. See the server logs for more information.", chatID, &messageID, false)
 }
 
 // get usable message from given update
 func usableMessageFromUpdate(update tg.Update) (message *tg.Message) {
-	if update.HasMessage() && update.Message.HasText() {
+	if update.HasMessage() && (update.Message.HasText() || update.Message.HasPhoto() || update.Message.HasDocument()) {
 		message = update.Message
-	} else if update.HasMessage() && update.Message.HasDocument() {
-		message = update.Message
-	} else if update.HasEditedMessage() && update.EditedMessage.HasText() {
+	} else if update.HasEditedMessage() && (update.EditedMessage.HasText() || update.EditedMessage.HasPhoto() || update.EditedMessage.HasDocument()) {
 		message = update.EditedMessage
 	}
 
@@ -417,7 +421,7 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 					} else {
 						log.Printf("failed to answer messages '%+v' with '%s' as file: %s", messages, parts, err)
 
-						_ = sendMessage(bot, conf, "Failed to send you the answer as a text file. See the server logs for more information.", chatID, &messageID, true)
+						_ = sendMessage(bot, conf, "Failed to send you the answer as a text file. See the server logs for more information.", chatID, &messageID, false)
 
 						numTokensInput, _ := countTokens(ctx, model, texts...)
 						numTokensOutput, _ := countTokens(ctx, model, parts...)
@@ -435,7 +439,7 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 					} else {
 						log.Printf("failed to answer messages '%+v' with '%+v': %s", messages, parts, err)
 
-						_ = sendMessage(bot, conf, "Failed to send you the answer as a text. See the server logs for more information.", chatID, &messageID, true)
+						_ = sendMessage(bot, conf, "Failed to send you the answer as a text. See the server logs for more information.", chatID, &messageID, false)
 
 						numTokensInput, _ := countTokens(ctx, model, texts...)
 						numTokensOutput, _ := countTokens(ctx, model, parts...)
@@ -457,7 +461,7 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 				} else {
 					log.Printf("failed to answer messages '%+v' with '%s' as file: %s", messages, parts, err)
 
-					_ = sendMessage(bot, conf, "Failed to send you the answer as a text file. See the server logs for more information.", chatID, &messageID, true)
+					_ = sendMessage(bot, conf, "Failed to send you the answer as a text file. See the server logs for more information.", chatID, &messageID, false)
 
 					numTokensInput, _ := countTokens(ctx, model, texts...)
 					numTokensOutput, _ := countTokens(ctx, model, parts...)
@@ -472,7 +476,7 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 	} else {
 		log.Printf("failed to create chat completion: %s", err)
 
-		_ = sendMessage(bot, conf, fmt.Sprintf("Failed to generate an answer from Gemini: %s", err), chatID, &messageID, true)
+		_ = sendMessage(bot, conf, fmt.Sprintf("Failed to generate an answer from Gemini: %s", err), chatID, &messageID, false)
 
 		// save to database (error)
 		savePromptAndResult(db, chatID, userID, username, messagesToPrompt(messages), 0, err.Error(), 0, false)
@@ -751,7 +755,7 @@ func startCommandHandler(conf config, allowedUsers map[string]bool) func(b *tg.B
 
 		chatID := message.Chat.ID
 
-		_ = sendMessage(b, conf, msgStart, chatID, nil, true)
+		_ = sendMessage(b, conf, msgStart, chatID, nil, false)
 	}
 }
 
