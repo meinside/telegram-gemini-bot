@@ -354,6 +354,9 @@ func countTokens(ctx context.Context, model *genai.GenerativeModel, parts ...gen
 
 // generate an answer to given message and send it to the chat
 func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config, db *Database, messages []chatMessage, chatID, userID int64, username string, messageID int64) {
+	// leave a reaction on the original message for confirmation
+	_ = bot.SetMessageReaction(chatID, messageID, tg.NewMessageReactionWithEmoji("👌"))
+
 	multimodal := false
 	texts := []genai.Part{}
 	for _, message := range messages {
