@@ -381,6 +381,9 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 		model = client.GenerativeModel(conf.GoogleGenerativeModel)
 	}
 
+	// set safety filters
+	model.SafetySettings = safetySettings(genai.HarmBlockNone)
+
 	if generated, err := model.GenerateContent(ctx, texts...); err == nil {
 		if conf.Verbose {
 			log.Printf("[verbose] %+v ===> %+v", messages, generated)
@@ -481,6 +484,35 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 		// save to database (error)
 		savePromptAndResult(db, chatID, userID, username, messagesToPrompt(messages), 0, err.Error(), 0, false)
 	}
+}
+
+// generate safety settings for all supported harm categories
+func safetySettings(threshold genai.HarmBlockThreshold) (settings []*genai.SafetySetting) {
+	for _, category := range []genai.HarmCategory{
+		/*
+			// categories for PaLM 2 (Legacy) models
+			genai.HarmCategoryUnspecified,
+			genai.HarmCategoryDerogatory,
+			genai.HarmCategoryToxicity,
+			genai.HarmCategoryViolence,
+			genai.HarmCategorySexual,
+			genai.HarmCategoryMedical,
+			genai.HarmCategoryDangerous,
+		*/
+
+		// all categories supported by Gemini models
+		genai.HarmCategoryHarassment,
+		genai.HarmCategoryHateSpeech,
+		genai.HarmCategorySexuallyExplicit,
+		genai.HarmCategoryDangerousContent,
+	} {
+		settings = append(settings, &genai.SafetySetting{
+			Category:  category,
+			Threshold: threshold,
+		})
+	}
+
+	return settings
 }
 
 // generate user's name
