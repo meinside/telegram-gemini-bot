@@ -382,7 +382,7 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 	}
 
 	// set safety filters
-	model.SafetySettings = safetySettings(genai.HarmBlockNone)
+	model.SafetySettings = safetySettings(genai.HarmBlockOnlyHigh)
 
 	if generated, err := model.GenerateContent(ctx, texts...); err == nil {
 		if conf.Verbose {
