@@ -34,6 +34,8 @@ and set your values:
   "google_generative_model": "gemini-pro",
   "google_multimodal_model": "gemini-pro-vision",
 
+  "google_ai_harm_block_threshold": 3,
+
   "allowed_telegram_users": ["user1", "user2"],
   "db_filepath": null,
   "verbose": false,
@@ -53,6 +55,8 @@ You can use [Infisical](https://infisical.com/) for saving & retrieving your bot
 {
   "google_generative_model": "gemini-pro",
   "google_multimodal_model": "gemini-pro-vision",
+
+  "google_ai_harm_block_threshold": 3,
 
   "allowed_telegram_users": ["user1", "user2"],
   "db_filepath": null,

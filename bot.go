@@ -70,6 +70,9 @@ type config struct {
 	GoogleGenerativeModel string `json:"google_generative_model,omitempty"`
 	GoogleMultimodalModel string `json:"google_multimodal_model,omitempty"`
 
+	// google ai safety settings threshold
+	GoogleAIHarmBlockThreshold int `json:"google_ai_harm_block_threshold,omitempty"`
+
 	// configurations
 	AllowedTelegramUsers  []string `json:"allowed_telegram_users"`
 	RequestLogsDBFilepath string   `json:"db_filepath,omitempty"`
@@ -382,7 +385,7 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 	}
 
 	// set safety filters
-	model.SafetySettings = safetySettings(genai.HarmBlockOnlyHigh)
+	model.SafetySettings = safetySettings(genai.HarmBlockThreshold(conf.GoogleAIHarmBlockThreshold))
 
 	if generated, err := model.GenerateContent(ctx, texts...); err == nil {
 		if conf.Verbose {
