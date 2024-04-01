@@ -5,12 +5,12 @@ go 1.21.3
 require (
 	github.com/google/generative-ai-go v0.10.0
 	github.com/meinside/infisical-go v0.3.1
-	github.com/meinside/telegram-bot-go v0.10.5
+	github.com/meinside/telegram-bot-go v0.10.6
 	github.com/meinside/version-go v0.0.3
 	github.com/tailscale/hujson v0.0.0-20221223112325-20486734a56a
 	google.golang.org/api v0.172.0
 	gorm.io/driver/sqlite v1.5.5
-	gorm.io/gorm v1.25.8
+	gorm.io/gorm v1.25.9
 )
 
 require (
