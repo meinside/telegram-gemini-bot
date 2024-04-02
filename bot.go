@@ -340,7 +340,7 @@ func sendFile(bot *tg.Bot, conf config, data []byte, chatID int64, messageID *in
 	if caption != nil {
 		options.SetCaption(*caption)
 	}
-	if res := bot.SendDocument(chatID, tg.InputFileFromBytes(data), options); !res.Ok {
+	if res := bot.SendDocument(chatID, tg.NewInputFileFromBytes(data), options); !res.Ok {
 		err = fmt.Errorf("failed to send document: %s", *res.Description)
 	}
 
