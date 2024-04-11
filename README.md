@@ -45,6 +45,8 @@ and set your values:
 }
 ```
 
+You can get appropriate model names from [here](https://ai.google.dev/models/gemini).
+
 If `db_filepath` is given, all prompts and their responses will be logged to the SQLite3 file.
 
 ### Using Infisical
