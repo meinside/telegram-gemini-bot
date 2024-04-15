@@ -20,6 +20,8 @@ import (
 
 	"github.com/google/generative-ai-go/genai"
 	"github.com/tailscale/hujson"
+	"golang.org/x/text/language"
+	"golang.org/x/text/message"
 	"google.golang.org/api/option"
 )
 
@@ -42,10 +44,11 @@ const (
 	msgDatabaseEmpty         = "Database is empty."
 	msgHelp                  = `Help message here:
 
-/stats : show stats of this bot.
-/help : show this help message.
+*/stats* : show stats of this bot.
+*/help* : show this help message.
 
-<i>version: %s</i>
+_models: %s / %s_
+_version: %s_
 `
 
 	defaultPromptForPhotos   = "Describe provided image(s)."
@@ -722,9 +725,11 @@ func retrieveStats(db *Database) string {
 			lines = append(lines, "")
 		}
 
+		printer := message.NewPrinter(language.English) // for adding commas to numbers
+
 		var count int64
 		if tx := db.db.Table("prompts").Select("count(distinct chat_id) as count").Scan(&count); tx.Error == nil {
-			lines = append(lines, fmt.Sprintf("* Chats: *%d*", count))
+			lines = append(lines, fmt.Sprintf("Chats: *%s*", printer.Sprintf("%d", count)))
 		}
 
 		var sumAndCount struct {
@@ -732,13 +737,13 @@ func retrieveStats(db *Database) string {
 			Count int64
 		}
 		if tx := db.db.Table("prompts").Select("sum(tokens) as sum, count(id) as count").Where("tokens > 0").Scan(&sumAndCount); tx.Error == nil {
-			lines = append(lines, fmt.Sprintf("* Prompts: *%d* (Total tokens: *%d*)", sumAndCount.Count, sumAndCount.Sum))
+			lines = append(lines, fmt.Sprintf("Prompts: *%s* (Total tokens: *%s*)", printer.Sprintf("%d", sumAndCount.Count), printer.Sprintf("%d", sumAndCount.Sum)))
 		}
 		if tx := db.db.Table("generateds").Select("sum(tokens) as sum, count(id) as count").Where("successful = 1").Scan(&sumAndCount); tx.Error == nil {
-			lines = append(lines, fmt.Sprintf("* Completions: *%d* (Total tokens: *%d*)", sumAndCount.Count, sumAndCount.Sum))
+			lines = append(lines, fmt.Sprintf("Completions: *%s* (Total tokens: *%s*)", printer.Sprintf("%d", sumAndCount.Count), printer.Sprintf("%d", sumAndCount.Sum)))
 		}
 		if tx := db.db.Table("generateds").Select("count(id) as count").Where("successful = 0").Scan(&count); tx.Error == nil {
-			lines = append(lines, fmt.Sprintf("* Errors: *%d*", count))
+			lines = append(lines, fmt.Sprintf("Errors: *%s*", printer.Sprintf("%d", count)))
 		}
 
 		if len(lines) > 0 {
@@ -770,8 +775,8 @@ func savePromptAndResult(db *Database, chatID, userID int64, username string, pr
 }
 
 // generate a help message with version info
-func helpMessage() string {
-	return fmt.Sprintf(msgHelp, version.Build(version.OS|version.Architecture|version.Revision))
+func helpMessage(conf config) string {
+	return fmt.Sprintf(msgHelp, conf.GoogleGenerativeModel, conf.GoogleMultimodalModel, version.Build(version.OS|version.Architecture|version.Revision))
 }
 
 // return a /start command handler
@@ -832,7 +837,7 @@ func helpCommandHandler(conf config, allowedUsers map[string]bool) func(b *tg.Bo
 		chatID := message.Chat.ID
 		messageID := message.MessageID
 
-		_ = sendMessage(b, conf, helpMessage(), chatID, &messageID, true)
+		_ = sendMessage(b, conf, helpMessage(conf), chatID, &messageID, true)
 	}
 }
 
