@@ -79,6 +79,7 @@ type config struct {
 	// configurations
 	AllowedTelegramUsers  []string `json:"allowed_telegram_users"`
 	RequestLogsDBFilepath string   `json:"db_filepath,omitempty"`
+	StreamMessages        bool     `json:"stream_messages,omitempty"`
 	Verbose               bool     `json:"verbose,omitempty"`
 
 	// telegram bot and google api tokens
@@ -216,7 +217,7 @@ func runBot(conf config) {
 				// type not supported
 				message := usableMessageFromUpdate(update)
 				if message != nil {
-					_ = sendMessage(b, conf, msgTypeNotSupported, message.Chat.ID, &message.MessageID, true)
+					_, _ = sendMessage(b, conf, msgTypeNotSupported, message.Chat.ID, &message.MessageID, true)
 				}
 			} else {
 				log.Printf("failed to poll updates: %s", err)
@@ -262,7 +263,7 @@ func handleMessage(ctx context.Context, bot *tg.Bot, client *genai.Client, conf 
 		log.Printf("no usable message from update: %+v", update)
 	}
 
-	_ = sendMessage(bot, conf, "Failed to get usable chat messages from your input. See the server logs for more information.", chatID, &messageID, false)
+	_, _ = sendMessage(bot, conf, "Failed to get usable chat messages from your input. See the server logs for more information.", chatID, &messageID, false)
 }
 
 // get usable message from given update
@@ -298,7 +299,7 @@ func chatMessagesFromTGMessage(bot *tg.Bot, message tg.Message) (chatMessages []
 }
 
 // send given text to the chat
-func sendMessage(bot *tg.Bot, conf config, message string, chatID int64, messageID *int64, useMarkdown bool) (err error) {
+func sendMessage(bot *tg.Bot, conf config, message string, chatID int64, messageID *int64, useMarkdown bool) (sentMessageID int64, err error) {
 	_ = bot.SendChatAction(chatID, tg.ChatActionTyping, nil)
 
 	if conf.Verbose {
@@ -314,10 +315,37 @@ func sendMessage(bot *tg.Bot, conf config, message string, chatID int64, message
 			MessageID: *messageID,
 		})
 	}
-	if res := bot.SendMessage(chatID, message, options); !res.Ok {
+	if res := bot.SendMessage(chatID, message, options); res.Ok {
+		sentMessageID = res.Result.MessageID
+	} else {
 		// FIXME: if the error was due to the malformed markdown, try again without markdown
 		if strings.Contains(*res.Description, "Bad Request: can't parse entities") {
 			return sendMessage(bot, conf, message, chatID, messageID, false)
+		} else {
+			err = fmt.Errorf("failed to send message: %s (requested message: %s)", *res.Description, message)
+		}
+	}
+
+	return sentMessageID, err
+}
+
+// update a message in the chat
+func updateMessage(bot *tg.Bot, conf config, message string, chatID int64, messageID int64, useMarkdown bool) (err error) {
+	_ = bot.SendChatAction(chatID, tg.ChatActionTyping, nil)
+
+	if conf.Verbose {
+		log.Printf("[verbose] updating message in chat(%d): '%s'", chatID, message)
+	}
+
+	options := tg.OptionsEditMessageText{}.
+		SetIDs(chatID, messageID)
+	if useMarkdown {
+		options.SetParseMode(tg.ParseModeMarkdown)
+	}
+	if res := bot.EditMessageText(message, options); !res.Ok {
+		// FIXME: if the error was due to the malformed markdown, try again without markdown
+		if strings.Contains(*res.Description, "Bad Request: can't parse entities") {
+			return updateMessage(bot, conf, message, chatID, messageID, false)
 		} else {
 			err = fmt.Errorf("failed to send message: %s (requested message: %s)", *res.Description, message)
 		}
@@ -327,7 +355,7 @@ func sendMessage(bot *tg.Bot, conf config, message string, chatID int64, message
 }
 
 // send given blob data as a document to the chat
-func sendFile(bot *tg.Bot, conf config, data []byte, chatID int64, messageID *int64, caption *string) (err error) {
+func sendFile(bot *tg.Bot, conf config, data []byte, chatID int64, messageID *int64, caption *string) (sentMessageID int64, err error) {
 	_ = bot.SendChatAction(chatID, tg.ChatActionTyping, nil)
 
 	if conf.Verbose {
@@ -343,11 +371,13 @@ func sendFile(bot *tg.Bot, conf config, data []byte, chatID int64, messageID *in
 	if caption != nil {
 		options.SetCaption(*caption)
 	}
-	if res := bot.SendDocument(chatID, tg.NewInputFileFromBytes(data), options); !res.Ok {
+	if res := bot.SendDocument(chatID, tg.NewInputFileFromBytes(data), options); res.Ok {
+		sentMessageID = res.Result.MessageID
+	} else {
 		err = fmt.Errorf("failed to send document: %s", *res.Description)
 	}
 
-	return err
+	return sentMessageID, err
 }
 
 func countTokens(ctx context.Context, model *genai.GenerativeModel, parts ...genai.Part) (count int32, err error) {
@@ -390,47 +420,165 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 	// set safety filters
 	model.SafetySettings = safetySettings(genai.HarmBlockThreshold(conf.GoogleAIHarmBlockThreshold))
 
-	if generated, err := model.GenerateContent(ctx, texts...); err == nil {
+	if conf.StreamMessages {
+		iterator := model.GenerateContentStream(ctx, texts...)
+
 		if conf.Verbose {
-			log.Printf("[verbose] %+v ===> %+v", messages, generated)
+			log.Printf("[verbose] streaming %+v ===> %+v", messages, iterator)
 		}
 
-		var content *genai.Content
-		var parts []genai.Part
+		var firstMessageID *int64 = nil
+		mergedText := ""
+		mergedParts := []genai.Part{}
 
-		if len(generated.Candidates) > 0 {
-			content = generated.Candidates[0].Content
+		for {
+			if it, err := iterator.Next(); err == nil {
+				var content *genai.Content
+				var parts []genai.Part
 
-			if len(content.Parts) > 0 {
-				parts = content.Parts
+				if len(it.Candidates) > 0 {
+					content = it.Candidates[0].Content
+
+					if len(content.Parts) > 0 {
+						parts = content.Parts
+						mergedParts = append(mergedParts, parts...)
+					}
+				}
+
+				if conf.Verbose {
+					log.Printf("[verbose] streaming answer to chat(%d): %+v", chatID, parts)
+				}
+
+				for _, part := range parts {
+					if text, ok := part.(genai.Text); ok { // (text)
+						generatedText := string(text)
+						mergedText += generatedText
+
+						if firstMessageID == nil { // send the first message
+							if sentMessageID, err := sendMessage(bot, conf, generatedText, chatID, &messageID, true); err == nil {
+								firstMessageID = &sentMessageID
+							} else {
+								log.Printf("failed to send stream messages '%+v' with '%+v': %s", messages, parts, err)
+							}
+						} else { // update the first message
+							// update the first message (append text)
+							if err := updateMessage(bot, conf, mergedText, chatID, *firstMessageID, true); err != nil {
+								log.Printf("failed to update stream messages '%+v' with '%+v': %s", messages, parts, err)
+							}
+						}
+					} else {
+						log.Printf("unsupported type of part for streaming: %+v", part)
+					}
+				}
 			} else {
-				parts = []genai.Part{genai.Text("There was no part in the generated candidate's content.")}
+				break
 			}
-		} else {
-			parts = []genai.Part{genai.Text("There was no response from Gemini API.")}
 		}
 
-		if conf.Verbose {
-			log.Printf("[verbose] sending answer to chat(%d): %+v", chatID, parts)
-		}
+		// log if it was successful or not
+		numTokensInput, _ := countTokens(ctx, model, texts...)
+		numTokensOutput, _ := countTokens(ctx, model, mergedParts...)
+		successful := (func() bool {
+			if firstMessageID != nil {
+				// leave a reaction on the first message for notifying the termination of the stream
+				_ = bot.SetMessageReaction(chatID, *firstMessageID, tg.NewMessageReactionWithEmoji("👌"))
 
-		for _, part := range parts {
-			if text, ok := part.(genai.Text); ok { // (text)
-				generatedText := string(text)
+				return true
+			}
+			return false
+		})()
+		savePromptAndResult(db, chatID, userID, username, messagesToPrompt(messages), uint(numTokensInput), mergedText, uint(numTokensOutput), successful)
+	} else {
+		if generated, err := model.GenerateContent(ctx, texts...); err == nil {
+			if conf.Verbose {
+				log.Printf("[verbose] %+v ===> %+v", messages, generated)
+			}
 
-				// if answer is too long for telegram api, send it as a text document
-				if len(generatedText) > 4096 {
-					caption := strings.ToValidUTF8(generatedText[:128], "") + "..."
-					if err := sendFile(bot, conf, []byte(generatedText), chatID, &messageID, &caption); err == nil {
+			var content *genai.Content
+			var parts []genai.Part
+
+			if len(generated.Candidates) > 0 {
+				content = generated.Candidates[0].Content
+
+				if len(content.Parts) > 0 {
+					parts = content.Parts
+				} else {
+					parts = []genai.Part{genai.Text("There was no part in the generated candidate's content.")}
+				}
+			} else {
+				parts = []genai.Part{genai.Text("There was no response from Gemini API.")}
+			}
+
+			if conf.Verbose {
+				log.Printf("[verbose] sending answer to chat(%d): %+v", chatID, parts)
+			}
+
+			for _, part := range parts {
+				if text, ok := part.(genai.Text); ok { // (text)
+					generatedText := string(text)
+
+					// if answer is too long for telegram api, send it as a text document
+					if len(generatedText) > 4096 {
+						caption := strings.ToValidUTF8(generatedText[:128], "") + "..."
+						if sentMessageID, err := sendFile(bot, conf, []byte(generatedText), chatID, &messageID, &caption); err == nil {
+							// leave a reaction on the sent message
+							_ = bot.SetMessageReaction(chatID, sentMessageID, tg.NewMessageReactionWithEmoji("👌"))
+
+							numTokensInput, _ := countTokens(ctx, model, texts...)
+							numTokensOutput, _ := countTokens(ctx, model, parts...)
+
+							// save to database (successful)
+							savePromptAndResult(db, chatID, userID, username, messagesToPrompt(messages), uint(numTokensInput), generatedText, uint(numTokensOutput), true)
+						} else {
+							log.Printf("failed to answer messages '%+v' with '%s' as file: %s", messages, parts, err)
+
+							_, _ = sendMessage(bot, conf, "Failed to send you the answer as a text file. See the server logs for more information.", chatID, &messageID, false)
+
+							numTokensInput, _ := countTokens(ctx, model, texts...)
+							numTokensOutput, _ := countTokens(ctx, model, parts...)
+
+							// save to database (error)
+							savePromptAndResult(db, chatID, userID, username, messagesToPrompt(messages), uint(numTokensInput), err.Error(), uint(numTokensOutput), false)
+						}
+					} else {
+						if sentMessageID, err := sendMessage(bot, conf, generatedText, chatID, &messageID, true); err == nil {
+							// leave a reaction on the sent message
+							_ = bot.SetMessageReaction(chatID, sentMessageID, tg.NewMessageReactionWithEmoji("👌"))
+
+							numTokensInput, _ := countTokens(ctx, model, texts...)
+							numTokensOutput, _ := countTokens(ctx, model, parts...)
+
+							// save to database (successful)
+							savePromptAndResult(db, chatID, userID, username, messagesToPrompt(messages), uint(numTokensInput), generatedText, uint(numTokensOutput), true)
+						} else {
+							log.Printf("failed to answer messages '%+v' with '%+v': %s", messages, parts, err)
+
+							_, _ = sendMessage(bot, conf, "Failed to send you the answer as a text. See the server logs for more information.", chatID, &messageID, false)
+
+							numTokensInput, _ := countTokens(ctx, model, texts...)
+							numTokensOutput, _ := countTokens(ctx, model, parts...)
+
+							// save to database (error)
+							savePromptAndResult(db, chatID, userID, username, messagesToPrompt(messages), uint(numTokensInput), err.Error(), uint(numTokensOutput), false)
+						}
+					}
+				} else if blob, ok := part.(genai.Blob); ok { // (blob)
+					caption := fmt.Sprintf("%d byte(s) of %s", len(blob.Data), blob.MIMEType)
+					if sentMessageID, err := sendFile(bot, conf, blob.Data, chatID, &messageID, &caption); err == nil {
+						// leave a reaction on the sent message
+						_ = bot.SetMessageReaction(chatID, sentMessageID, tg.NewMessageReactionWithEmoji("👌"))
+
 						numTokensInput, _ := countTokens(ctx, model, texts...)
 						numTokensOutput, _ := countTokens(ctx, model, parts...)
+
+						generatedText := fmt.Sprintf("%d bytes of %s", len(blob.Data), blob.MIMEType)
 
 						// save to database (successful)
 						savePromptAndResult(db, chatID, userID, username, messagesToPrompt(messages), uint(numTokensInput), generatedText, uint(numTokensOutput), true)
 					} else {
 						log.Printf("failed to answer messages '%+v' with '%s' as file: %s", messages, parts, err)
 
-						_ = sendMessage(bot, conf, "Failed to send you the answer as a text file. See the server logs for more information.", chatID, &messageID, false)
+						_, _ = sendMessage(bot, conf, "Failed to send you the answer as a text file. See the server logs for more information.", chatID, &messageID, false)
 
 						numTokensInput, _ := countTokens(ctx, model, texts...)
 						numTokensOutput, _ := countTokens(ctx, model, parts...)
@@ -439,56 +587,17 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 						savePromptAndResult(db, chatID, userID, username, messagesToPrompt(messages), uint(numTokensInput), err.Error(), uint(numTokensOutput), false)
 					}
 				} else {
-					if err := sendMessage(bot, conf, generatedText, chatID, &messageID, true); err == nil {
-						numTokensInput, _ := countTokens(ctx, model, texts...)
-						numTokensOutput, _ := countTokens(ctx, model, parts...)
-
-						// save to database (successful)
-						savePromptAndResult(db, chatID, userID, username, messagesToPrompt(messages), uint(numTokensInput), generatedText, uint(numTokensOutput), true)
-					} else {
-						log.Printf("failed to answer messages '%+v' with '%+v': %s", messages, parts, err)
-
-						_ = sendMessage(bot, conf, "Failed to send you the answer as a text. See the server logs for more information.", chatID, &messageID, false)
-
-						numTokensInput, _ := countTokens(ctx, model, texts...)
-						numTokensOutput, _ := countTokens(ctx, model, parts...)
-
-						// save to database (error)
-						savePromptAndResult(db, chatID, userID, username, messagesToPrompt(messages), uint(numTokensInput), err.Error(), uint(numTokensOutput), false)
-					}
+					log.Printf("unsupported type of part: %+v", part)
 				}
-			} else if blob, ok := part.(genai.Blob); ok { // (blob)
-				caption := fmt.Sprintf("%d byte(s) of %s", len(blob.Data), blob.MIMEType)
-				if err := sendFile(bot, conf, blob.Data, chatID, &messageID, &caption); err == nil {
-					numTokensInput, _ := countTokens(ctx, model, texts...)
-					numTokensOutput, _ := countTokens(ctx, model, parts...)
-
-					generatedText := fmt.Sprintf("%d bytes of %s", len(blob.Data), blob.MIMEType)
-
-					// save to database (successful)
-					savePromptAndResult(db, chatID, userID, username, messagesToPrompt(messages), uint(numTokensInput), generatedText, uint(numTokensOutput), true)
-				} else {
-					log.Printf("failed to answer messages '%+v' with '%s' as file: %s", messages, parts, err)
-
-					_ = sendMessage(bot, conf, "Failed to send you the answer as a text file. See the server logs for more information.", chatID, &messageID, false)
-
-					numTokensInput, _ := countTokens(ctx, model, texts...)
-					numTokensOutput, _ := countTokens(ctx, model, parts...)
-
-					// save to database (error)
-					savePromptAndResult(db, chatID, userID, username, messagesToPrompt(messages), uint(numTokensInput), err.Error(), uint(numTokensOutput), false)
-				}
-			} else {
-				log.Printf("unsupported type of part: %+v", part)
 			}
+		} else {
+			log.Printf("failed to create chat completion: %s", err)
+
+			_, _ = sendMessage(bot, conf, fmt.Sprintf("Failed to generate an answer from Gemini: %s", err), chatID, &messageID, false)
+
+			// save to database (error)
+			savePromptAndResult(db, chatID, userID, username, messagesToPrompt(messages), 0, err.Error(), 0, false)
 		}
-	} else {
-		log.Printf("failed to create chat completion: %s", err)
-
-		_ = sendMessage(bot, conf, fmt.Sprintf("Failed to generate an answer from Gemini: %s", err), chatID, &messageID, false)
-
-		// save to database (error)
-		savePromptAndResult(db, chatID, userID, username, messagesToPrompt(messages), 0, err.Error(), 0, false)
 	}
 }
 
@@ -795,7 +904,7 @@ func startCommandHandler(conf config, allowedUsers map[string]bool) func(b *tg.B
 
 		chatID := message.Chat.ID
 
-		_ = sendMessage(b, conf, msgStart, chatID, nil, false)
+		_, _ = sendMessage(b, conf, msgStart, chatID, nil, false)
 	}
 }
 
@@ -816,7 +925,7 @@ func statsCommandHandler(conf config, db *Database, allowedUsers map[string]bool
 		chatID := message.Chat.ID
 		messageID := message.MessageID
 
-		_ = sendMessage(b, conf, retrieveStats(db), chatID, &messageID, true)
+		_, _ = sendMessage(b, conf, retrieveStats(db), chatID, &messageID, true)
 	}
 }
 
@@ -837,7 +946,7 @@ func helpCommandHandler(conf config, allowedUsers map[string]bool) func(b *tg.Bo
 		chatID := message.Chat.ID
 		messageID := message.MessageID
 
-		_ = sendMessage(b, conf, helpMessage(conf), chatID, &messageID, true)
+		_, _ = sendMessage(b, conf, helpMessage(conf), chatID, &messageID, true)
 	}
 }
 
@@ -858,6 +967,6 @@ func noSuchCommandHandler(conf config, allowedUsers map[string]bool) func(b *tg.
 		chatID := message.Chat.ID
 		messageID := message.MessageID
 
-		_ = sendMessage(b, conf, fmt.Sprintf(msgCmdNotSupported, cmd), chatID, &messageID, true)
+		_, _ = sendMessage(b, conf, fmt.Sprintf(msgCmdNotSupported, cmd), chatID, &messageID, true)
 	}
 }

@@ -38,6 +38,7 @@ and set your values:
 
   "allowed_telegram_users": ["user1", "user2"],
   "db_filepath": null,
+  "stream_messages": false,
   "verbose": false,
 
   "telegram_bot_token": "123456:abcdefghijklmnop-QRSTUVWXYZ7890",
@@ -62,6 +63,7 @@ You can use [Infisical](https://infisical.com/) for saving & retrieving your bot
 
   "allowed_telegram_users": ["user1", "user2"],
   "db_filepath": null,
+  "stream_messages": false,
   "verbose": false,
 
   "infisical": {
@@ -124,7 +126,11 @@ and `systemctl` enable|start|restart|stop the service.
 ## Todos / Known Issues
 
 - [X] Handle returning messages' size limit (Telegram Bot API's limit: [4096 chars](https://core.telegram.org/bots/api#sendmessage))
-  - Will send a plain-text document instead of an ordinary text message.
+  - Will send a plain-text document instead of an ordinary text message. (Won't work when the `stream_messages` option is true)
+- [X] Add an option for enabling message streaming.
+  - Will update message texts with streamed messages.
+- [X] Add ways of informing users about the status of background processes.
+  - Will add reactions on successfully received or generated messages.
 
 ## License
 
