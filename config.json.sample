@@ -6,6 +6,7 @@
 
   "allowed_telegram_users": ["user1", "user2"],
   "db_filepath": null,
+  "stream_messages": false,
   "verbose": false,
 
   "telegram_bot_token": "123456:abcdefghijklmnop-QRSTUVWXYZ7890",
