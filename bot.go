@@ -1,6 +1,6 @@
-package main
-
 // bot.go
+
+package main
 
 import (
 	"context"
@@ -217,7 +217,7 @@ func runBot(conf config) {
 				// type not supported
 				message := usableMessageFromUpdate(update)
 				if message != nil {
-					_, _ = sendMessage(b, conf, msgTypeNotSupported, message.Chat.ID, &message.MessageID, true)
+					_, _ = sendMessage(b, conf, msgTypeNotSupported, message.Chat.ID, &message.MessageID)
 				}
 			} else {
 				log.Printf("failed to poll updates: %s", err)
@@ -263,7 +263,7 @@ func handleMessage(ctx context.Context, bot *tg.Bot, client *genai.Client, conf 
 		log.Printf("no usable message from update: %+v", update)
 	}
 
-	_, _ = sendMessage(bot, conf, "Failed to get usable chat messages from your input. See the server logs for more information.", chatID, &messageID, false)
+	_, _ = sendMessage(bot, conf, "Failed to get usable chat messages from your input. See the server logs for more information.", chatID, &messageID)
 }
 
 // get usable message from given update
@@ -299,7 +299,7 @@ func chatMessagesFromTGMessage(bot *tg.Bot, message tg.Message) (chatMessages []
 }
 
 // send given text to the chat
-func sendMessage(bot *tg.Bot, conf config, message string, chatID int64, messageID *int64, useMarkdown bool) (sentMessageID int64, err error) {
+func sendMessage(bot *tg.Bot, conf config, message string, chatID int64, messageID *int64) (sentMessageID int64, err error) {
 	_ = bot.SendChatAction(chatID, tg.ChatActionTyping, nil)
 
 	if conf.Verbose {
@@ -307,9 +307,6 @@ func sendMessage(bot *tg.Bot, conf config, message string, chatID int64, message
 	}
 
 	options := tg.OptionsSendMessage{}
-	if useMarkdown {
-		options.SetParseMode(tg.ParseModeMarkdown)
-	}
 	if messageID != nil {
 		options.SetReplyParameters(tg.ReplyParameters{
 			MessageID: *messageID,
@@ -318,19 +315,14 @@ func sendMessage(bot *tg.Bot, conf config, message string, chatID int64, message
 	if res := bot.SendMessage(chatID, message, options); res.Ok {
 		sentMessageID = res.Result.MessageID
 	} else {
-		// FIXME: if the error was due to the malformed markdown, try again without markdown
-		if strings.Contains(*res.Description, "Bad Request: can't parse entities") {
-			return sendMessage(bot, conf, message, chatID, messageID, false)
-		} else {
-			err = fmt.Errorf("failed to send message: %s (requested message: %s)", *res.Description, message)
-		}
+		err = fmt.Errorf("failed to send message: %s (requested message: %s)", *res.Description, message)
 	}
 
 	return sentMessageID, err
 }
 
 // update a message in the chat
-func updateMessage(bot *tg.Bot, conf config, message string, chatID int64, messageID int64, useMarkdown bool) (err error) {
+func updateMessage(bot *tg.Bot, conf config, message string, chatID int64, messageID int64) (err error) {
 	_ = bot.SendChatAction(chatID, tg.ChatActionTyping, nil)
 
 	if conf.Verbose {
@@ -339,16 +331,8 @@ func updateMessage(bot *tg.Bot, conf config, message string, chatID int64, messa
 
 	options := tg.OptionsEditMessageText{}.
 		SetIDs(chatID, messageID)
-	if useMarkdown {
-		options.SetParseMode(tg.ParseModeMarkdown)
-	}
 	if res := bot.EditMessageText(message, options); !res.Ok {
-		// FIXME: if the error was due to the malformed markdown, try again without markdown
-		if strings.Contains(*res.Description, "Bad Request: can't parse entities") {
-			return updateMessage(bot, conf, message, chatID, messageID, false)
-		} else {
-			err = fmt.Errorf("failed to send message: %s (requested message: %s)", *res.Description, message)
-		}
+		err = fmt.Errorf("failed to send message: %s (requested message: %s)", *res.Description, message)
 	}
 
 	return err
@@ -455,14 +439,14 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 						mergedText += generatedText
 
 						if firstMessageID == nil { // send the first message
-							if sentMessageID, err := sendMessage(bot, conf, generatedText, chatID, &messageID, true); err == nil {
+							if sentMessageID, err := sendMessage(bot, conf, generatedText, chatID, &messageID); err == nil {
 								firstMessageID = &sentMessageID
 							} else {
 								log.Printf("failed to send stream messages '%+v' with '%+v': %s", messages, parts, err)
 							}
 						} else { // update the first message
 							// update the first message (append text)
-							if err := updateMessage(bot, conf, mergedText, chatID, *firstMessageID, true); err != nil {
+							if err := updateMessage(bot, conf, mergedText, chatID, *firstMessageID); err != nil {
 								log.Printf("failed to update stream messages '%+v' with '%+v': %s", messages, parts, err)
 							}
 						}
@@ -532,7 +516,7 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 						} else {
 							log.Printf("failed to answer messages '%+v' with '%s' as file: %s", messages, parts, err)
 
-							_, _ = sendMessage(bot, conf, "Failed to send you the answer as a text file. See the server logs for more information.", chatID, &messageID, false)
+							_, _ = sendMessage(bot, conf, "Failed to send you the answer as a text file. See the server logs for more information.", chatID, &messageID)
 
 							numTokensInput, _ := countTokens(ctx, model, texts...)
 							numTokensOutput, _ := countTokens(ctx, model, parts...)
@@ -541,7 +525,7 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 							savePromptAndResult(db, chatID, userID, username, messagesToPrompt(messages), uint(numTokensInput), err.Error(), uint(numTokensOutput), false)
 						}
 					} else {
-						if sentMessageID, err := sendMessage(bot, conf, generatedText, chatID, &messageID, true); err == nil {
+						if sentMessageID, err := sendMessage(bot, conf, generatedText, chatID, &messageID); err == nil {
 							// leave a reaction on the sent message
 							_ = bot.SetMessageReaction(chatID, sentMessageID, tg.NewMessageReactionWithEmoji("👌"))
 
@@ -553,7 +537,7 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 						} else {
 							log.Printf("failed to answer messages '%+v' with '%+v': %s", messages, parts, err)
 
-							_, _ = sendMessage(bot, conf, "Failed to send you the answer as a text. See the server logs for more information.", chatID, &messageID, false)
+							_, _ = sendMessage(bot, conf, "Failed to send you the answer as a text. See the server logs for more information.", chatID, &messageID)
 
 							numTokensInput, _ := countTokens(ctx, model, texts...)
 							numTokensOutput, _ := countTokens(ctx, model, parts...)
@@ -578,7 +562,7 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 					} else {
 						log.Printf("failed to answer messages '%+v' with '%s' as file: %s", messages, parts, err)
 
-						_, _ = sendMessage(bot, conf, "Failed to send you the answer as a text file. See the server logs for more information.", chatID, &messageID, false)
+						_, _ = sendMessage(bot, conf, "Failed to send you the answer as a text file. See the server logs for more information.", chatID, &messageID)
 
 						numTokensInput, _ := countTokens(ctx, model, texts...)
 						numTokensOutput, _ := countTokens(ctx, model, parts...)
@@ -593,7 +577,7 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 		} else {
 			log.Printf("failed to create chat completion: %s", err)
 
-			_, _ = sendMessage(bot, conf, fmt.Sprintf("Failed to generate an answer from Gemini: %s", err), chatID, &messageID, false)
+			_, _ = sendMessage(bot, conf, fmt.Sprintf("Failed to generate an answer from Gemini: %s", err), chatID, &messageID)
 
 			// save to database (error)
 			savePromptAndResult(db, chatID, userID, username, messagesToPrompt(messages), 0, err.Error(), 0, false)
@@ -904,7 +888,7 @@ func startCommandHandler(conf config, allowedUsers map[string]bool) func(b *tg.B
 
 		chatID := message.Chat.ID
 
-		_, _ = sendMessage(b, conf, msgStart, chatID, nil, false)
+		_, _ = sendMessage(b, conf, msgStart, chatID, nil)
 	}
 }
 
@@ -925,7 +909,7 @@ func statsCommandHandler(conf config, db *Database, allowedUsers map[string]bool
 		chatID := message.Chat.ID
 		messageID := message.MessageID
 
-		_, _ = sendMessage(b, conf, retrieveStats(db), chatID, &messageID, true)
+		_, _ = sendMessage(b, conf, retrieveStats(db), chatID, &messageID)
 	}
 }
 
@@ -946,7 +930,7 @@ func helpCommandHandler(conf config, allowedUsers map[string]bool) func(b *tg.Bo
 		chatID := message.Chat.ID
 		messageID := message.MessageID
 
-		_, _ = sendMessage(b, conf, helpMessage(conf), chatID, &messageID, true)
+		_, _ = sendMessage(b, conf, helpMessage(conf), chatID, &messageID)
 	}
 }
 
@@ -967,6 +951,6 @@ func noSuchCommandHandler(conf config, allowedUsers map[string]bool) func(b *tg.
 		chatID := message.Chat.ID
 		messageID := message.MessageID
 
-		_, _ = sendMessage(b, conf, fmt.Sprintf(msgCmdNotSupported, cmd), chatID, &messageID, true)
+		_, _ = sendMessage(b, conf, fmt.Sprintf(msgCmdNotSupported, cmd), chatID, &messageID)
 	}
 }

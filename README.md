@@ -13,6 +13,10 @@ You can also upload photos with a caption as a prompt:
 
 <img width="560" alt="screenshot4" src="https://github.com/meinside/telegram-gemini-bot/assets/185988/b54c1d60-0675-444d-812c-c1c303c8dca2">
 
+With streaming option on, generated text will be received part by part:
+
+![streamed message](https://github.com/meinside/telegram-gemini-bot/assets/185988/05dda043-8b3f-4fd9-8be0-9c0f5e8076a3)
+
 ## Prerequisites
 
 * A [Google API key](https://aistudio.google.com/app/apikey), and
@@ -131,6 +135,7 @@ and `systemctl` enable|start|restart|stop the service.
   - Will update message texts with streamed messages.
 - [X] Add ways of informing users about the status of background processes.
   - Will add reactions on successfully received or generated messages.
+- [ ] Handle markdown texts gracefully. 
 
 ## License
 
