@@ -22,6 +22,7 @@ import (
 	"github.com/tailscale/hujson"
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
+	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 )
 
@@ -404,21 +405,23 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 	}
 
 	// set system instruction
-	model.SystemInstruction = &genai.Content{
-		Role: "model",
-		Parts: []genai.Part{
-			genai.Text(systemInstruction),
-		},
+	if !multimodal {
+		model.SystemInstruction = &genai.Content{
+			Role: "model",
+			Parts: []genai.Part{
+				genai.Text(systemInstruction),
+			},
+		}
 	}
 
 	// set safety filters
 	model.SafetySettings = safetySettings(genai.HarmBlockThreshold(conf.GoogleAIHarmBlockThreshold))
 
 	if conf.StreamMessages {
-		iterator := model.GenerateContentStream(ctx, texts...)
+		iter := model.GenerateContentStream(ctx, texts...)
 
 		if conf.Verbose {
-			log.Printf("[verbose] streaming %+v ===> %+v", messages, iterator)
+			log.Printf("[verbose] streaming %+v ===> %+v", messages, iter)
 		}
 
 		var firstMessageID *int64 = nil
@@ -426,7 +429,7 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 		mergedParts := []genai.Part{}
 
 		for {
-			if it, err := iterator.Next(); err == nil {
+			if it, err := iter.Next(); err == nil {
 				var content *genai.Content
 				var parts []genai.Part
 
@@ -465,6 +468,9 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 					}
 				}
 			} else {
+				if err != iterator.Done {
+					log.Printf("failed to iterate stream: %s", err)
+				}
 				break
 			}
 		}
@@ -824,7 +830,7 @@ func retrieveStats(db *Database) string {
 
 		var prompt Prompt
 		if tx := db.db.First(&prompt); tx.Error == nil {
-			lines = append(lines, fmt.Sprintf("Since _%s_", prompt.CreatedAt.Format("2006-01-02 15:04:05")))
+			lines = append(lines, fmt.Sprintf("Since %s", prompt.CreatedAt.Format("2006-01-02 15:04:05")))
 			lines = append(lines, "")
 		}
 
@@ -832,7 +838,7 @@ func retrieveStats(db *Database) string {
 
 		var count int64
 		if tx := db.db.Table("prompts").Select("count(distinct chat_id) as count").Scan(&count); tx.Error == nil {
-			lines = append(lines, fmt.Sprintf("Chats: *%s*", printer.Sprintf("%d", count)))
+			lines = append(lines, fmt.Sprintf("Chats: %s", printer.Sprintf("%d", count)))
 		}
 
 		var sumAndCount struct {
@@ -840,13 +846,13 @@ func retrieveStats(db *Database) string {
 			Count int64
 		}
 		if tx := db.db.Table("prompts").Select("sum(tokens) as sum, count(id) as count").Where("tokens > 0").Scan(&sumAndCount); tx.Error == nil {
-			lines = append(lines, fmt.Sprintf("Prompts: *%s* (Total tokens: *%s*)", printer.Sprintf("%d", sumAndCount.Count), printer.Sprintf("%d", sumAndCount.Sum)))
+			lines = append(lines, fmt.Sprintf("Prompts: %s (Total tokens: %s)", printer.Sprintf("%d", sumAndCount.Count), printer.Sprintf("%d", sumAndCount.Sum)))
 		}
 		if tx := db.db.Table("generateds").Select("sum(tokens) as sum, count(id) as count").Where("successful = 1").Scan(&sumAndCount); tx.Error == nil {
-			lines = append(lines, fmt.Sprintf("Completions: *%s* (Total tokens: *%s*)", printer.Sprintf("%d", sumAndCount.Count), printer.Sprintf("%d", sumAndCount.Sum)))
+			lines = append(lines, fmt.Sprintf("Completions: %s (Total tokens: %s)", printer.Sprintf("%d", sumAndCount.Count), printer.Sprintf("%d", sumAndCount.Sum)))
 		}
 		if tx := db.db.Table("generateds").Select("count(id) as count").Where("successful = 0").Scan(&count); tx.Error == nil {
-			lines = append(lines, fmt.Sprintf("Errors: *%s*", printer.Sprintf("%d", count)))
+			lines = append(lines, fmt.Sprintf("Errors: %s", printer.Sprintf("%d", count)))
 		}
 
 		if len(lines) > 0 {
