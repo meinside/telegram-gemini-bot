@@ -4,18 +4,26 @@ A telegram bot which answers to messages with [Gemini API](https://ai.google.dev
 
 <img width="562" alt="screenshot1" src="https://github.com/meinside/telegram-gemini-bot/assets/185988/1e126512-761a-4f7d-8925-346caf1b3efb">
 
-You can reply to messages for keeping the context of your conversation:
+---
+
+* You can reply to messages for keeping the context of your conversation:
 
 <img width="563" alt="screenshot2" src="https://github.com/meinside/telegram-gemini-bot/assets/185988/a0674089-739d-4b80-916e-ceb39d48dd09">
 <img width="561" alt="screenshot3" src="https://github.com/meinside/telegram-gemini-bot/assets/185988/3861242a-14fc-495c-a1d7-75caac630e4d">
 
-You can also upload photos with a caption as a prompt:
+---
+
+* You can also upload photos with a caption as a prompt:
 
 <img width="560" alt="screenshot4" src="https://github.com/meinside/telegram-gemini-bot/assets/185988/b54c1d60-0675-444d-812c-c1c303c8dca2">
 
-With streaming option on, generated text will be received part by part:
+---
+
+* With streaming option on, generated text will be received part by part:
 
 ![streamed message](https://github.com/meinside/telegram-gemini-bot/assets/185988/05dda043-8b3f-4fd9-8be0-9c0f5e8076a3)
+
+---
 
 ## Prerequisites
 
