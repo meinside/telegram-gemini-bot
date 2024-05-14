@@ -44,12 +44,14 @@ const (
 	msgDatabaseEmpty         = "Database is empty."
 	msgHelp                  = `Help message here:
 
-*/stats* : show stats of this bot.
-*/help* : show this help message.
+/stats : show stats of this bot.
+/help : show this help message.
 
-_models: %s / %s_
-_version: %s_
+- models: %s / %s
+- version: %s
 `
+
+	systemInstruction = "You are a Telegram bot with a backend system which uses the Google Gemini API. Respond to the user's message as precisely as possible."
 
 	defaultPromptForPhotos   = "Describe provided image(s)."
 	defaultPromptForDocument = "Describe provided document."
@@ -399,6 +401,14 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 		model = client.GenerativeModel(conf.GoogleMultimodalModel)
 	} else {
 		model = client.GenerativeModel(conf.GoogleGenerativeModel)
+	}
+
+	// set system instruction
+	model.SystemInstruction = &genai.Content{
+		Role: "model",
+		Parts: []genai.Part{
+			genai.Text(systemInstruction),
+		},
 	}
 
 	// set safety filters
