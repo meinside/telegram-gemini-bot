@@ -3,13 +3,13 @@ module github.com/meinside/telegram-gemini-bot
 go 1.21.3
 
 require (
-	github.com/google/generative-ai-go v0.11.2
+	github.com/google/generative-ai-go v0.12.0
 	github.com/meinside/infisical-go v0.3.1
 	github.com/meinside/telegram-bot-go v0.10.8
 	github.com/meinside/version-go v0.0.3
 	github.com/tailscale/hujson v0.0.0-20221223112325-20486734a56a
 	golang.org/x/text v0.15.0
-	google.golang.org/api v0.179.0
+	google.golang.org/api v0.180.0
 	gorm.io/driver/sqlite v1.5.5
 	gorm.io/gorm v1.25.10
 )
@@ -45,8 +45,8 @@ require (
 	golang.org/x/sync v0.7.0 // indirect
 	golang.org/x/sys v0.20.0 // indirect
 	golang.org/x/time v0.5.0 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20240509183442-62759503f434 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20240509183442-62759503f434 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20240513163218-0867130af1f8 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20240513163218-0867130af1f8 // indirect
 	google.golang.org/grpc v1.63.2 // indirect
 	google.golang.org/protobuf v1.34.1 // indirect
 )
