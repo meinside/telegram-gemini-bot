@@ -27,8 +27,9 @@ A telegram bot which answers to messages with [Gemini API](https://ai.google.dev
 
 ## Prerequisites
 
+* A [Telegram Bot Token](https://telegram.me/BotFather),
 * A [Google API key](https://aistudio.google.com/app/apikey), and
-* a machine which can build and run golang applications.
+* A machine which can build and run golang applications.
 
 ## Configurations
 
@@ -36,7 +37,7 @@ Create a configuration file:
 
 ```bash
 $ cp config.json.sample config.json
-$ vi config.json
+$ $EDITOR config.json
 ```
 
 and set your values:
@@ -143,7 +144,7 @@ and `systemctl` enable|start|restart|stop the service.
   - Will update message texts with streamed messages.
 - [X] Add ways of informing users about the status of background processes.
   - Will add reactions on successfully received or generated messages.
-- [ ] Handle markdown texts gracefully. 
+- [ ] Handle markdown texts gracefully.
 
 ## License
 
