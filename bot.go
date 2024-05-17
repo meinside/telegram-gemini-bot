@@ -26,9 +26,13 @@ import (
 	"google.golang.org/api/option"
 )
 
+// constants for default values
 const (
 	defaultGenerationModel = "gemini-pro"
 	defaultMultimodalModel = "gemini-pro-vision"
+
+	defaultPromptForPhotos   = "Describe provided image(s)."
+	defaultPromptForDocument = "Describe provided document."
 )
 
 const (
@@ -53,9 +57,6 @@ const (
 `
 
 	systemInstruction = "You are a Telegram bot with a backend system which uses the Google Gemini API. Respond to the user's message as precisely as possible."
-
-	defaultPromptForPhotos   = "Describe provided image(s)."
-	defaultPromptForDocument = "Describe provided document."
 )
 
 type chatMessageRole string
@@ -367,6 +368,7 @@ func sendFile(bot *tg.Bot, conf config, data []byte, chatID int64, messageID *in
 	return sentMessageID, err
 }
 
+// count tokens
 func countTokens(ctx context.Context, model *genai.GenerativeModel, parts ...genai.Part) (count int32, err error) {
 	if len(parts) == 0 {
 		return 0, fmt.Errorf("cannot count tokens of an empty parts array")
