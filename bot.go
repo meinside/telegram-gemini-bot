@@ -28,11 +28,14 @@ import (
 
 // constants for default values
 const (
-	defaultGenerationModel = "gemini-pro"
-	defaultMultimodalModel = "gemini-pro-vision"
+	defaultGenerationModel      = "gemini-pro"
+	defaultMultimodalModel      = "gemini-pro-vision"
+	defaultAIHarmBlockThreshold = 3
 
 	defaultPromptForPhotos   = "Describe provided image(s)."
 	defaultPromptForDocument = "Describe provided document."
+
+	defaultSystemInstruction = "You are a Telegram bot with a backend system which uses the Google Gemini API. Respond to the user's message as precisely as possible."
 )
 
 const (
@@ -55,8 +58,6 @@ const (
 - models: %s / %s
 - version: %s
 `
-
-	systemInstruction = "You are a Telegram bot with a backend system which uses the Google Gemini API. Respond to the user's message as precisely as possible."
 )
 
 type chatMessageRole string
@@ -74,11 +75,13 @@ type chatMessage struct {
 
 // config struct for loading a configuration file
 type config struct {
-	GoogleGenerativeModel string `json:"google_generative_model,omitempty"`
-	GoogleMultimodalModel string `json:"google_multimodal_model,omitempty"`
+	SystemInstruction *string `json:"system_instruction,omitempty"`
+
+	GoogleGenerativeModel *string `json:"google_generative_model,omitempty"`
+	GoogleMultimodalModel *string `json:"google_multimodal_model,omitempty"`
 
 	// google ai safety settings threshold
-	GoogleAIHarmBlockThreshold int `json:"google_ai_harm_block_threshold,omitempty"`
+	GoogleAIHarmBlockThreshold *int `json:"google_ai_harm_block_threshold,omitempty"`
 
 	// configurations
 	AllowedTelegramUsers  []string `json:"allowed_telegram_users"`
@@ -87,21 +90,24 @@ type config struct {
 	Verbose               bool     `json:"verbose,omitempty"`
 
 	// telegram bot and google api tokens
-	TelegramBotToken string `json:"telegram_bot_token,omitempty"`
-	GoogleAIAPIKey   string `json:"google_ai_api_key"`
+	TelegramBotToken *string `json:"telegram_bot_token,omitempty"`
+	GoogleAIAPIKey   *string `json:"google_ai_api_key,omitempty"`
 
 	// or Infisical settings
-	Infisical *struct {
-		ClientID     string `json:"client_id"`
-		ClientSecret string `json:"client_secret"`
+	Infisical *infisicalSetting `json:"infisical,omitempty"`
+}
 
-		WorkspaceID string               `json:"workspace_id"`
-		Environment string               `json:"environment"`
-		SecretType  infisical.SecretType `json:"secret_type"`
+// infisical setting struct
+type infisicalSetting struct {
+	ClientID     string `json:"client_id"`
+	ClientSecret string `json:"client_secret"`
 
-		TelegramBotTokenKeyPath string `json:"telegram_bot_token_key_path"`
-		GoogleAIAPIKeyKeyPath   string `json:"google_ai_api_key_key_path"`
-	} `json:"infisical,omitempty"`
+	WorkspaceID string               `json:"workspace_id"`
+	Environment string               `json:"environment"`
+	SecretType  infisical.SecretType `json:"secret_type"`
+
+	TelegramBotTokenKeyPath string `json:"telegram_bot_token_key_path"`
+	GoogleAIAPIKeyKeyPath   string `json:"google_ai_api_key_key_path"`
 }
 
 // load config at given path
@@ -110,7 +116,7 @@ func loadConfig(fpath string) (conf config, err error) {
 	if bytes, err = os.ReadFile(fpath); err == nil {
 		if bytes, err = standardizeJSON(bytes); err == nil {
 			if err = json.Unmarshal(bytes, &conf); err == nil {
-				if (conf.TelegramBotToken == "" || conf.GoogleAIAPIKey == "") && conf.Infisical != nil {
+				if (conf.TelegramBotToken == nil || conf.GoogleAIAPIKey == nil) && conf.Infisical != nil {
 					// read token and api key from infisical
 					var botToken, apiKey string
 
@@ -129,19 +135,30 @@ func loadConfig(fpath string) (conf config, err error) {
 
 					var exists bool
 					if botToken, exists = kvs[conf.Infisical.TelegramBotTokenKeyPath]; exists {
-						conf.TelegramBotToken = botToken
+						conf.TelegramBotToken = &botToken
 					}
 					if apiKey, exists = kvs[conf.Infisical.GoogleAIAPIKeyKeyPath]; exists {
-						conf.GoogleAIAPIKey = apiKey
+						conf.GoogleAIAPIKey = &apiKey
 					}
 				}
 
 				// set default/fallback values
-				if conf.GoogleGenerativeModel == "" {
-					conf.GoogleGenerativeModel = defaultGenerationModel
+				if conf.SystemInstruction == nil {
+					conf.SystemInstruction = ptr(defaultSystemInstruction)
 				}
-				if conf.GoogleMultimodalModel == "" {
-					conf.GoogleMultimodalModel = defaultMultimodalModel
+				if conf.GoogleGenerativeModel == nil {
+					conf.GoogleGenerativeModel = ptr(defaultGenerationModel)
+				}
+				if conf.GoogleMultimodalModel == nil {
+					conf.GoogleMultimodalModel = ptr(defaultMultimodalModel)
+				}
+				if conf.GoogleAIHarmBlockThreshold == nil {
+					conf.GoogleAIHarmBlockThreshold = ptr(defaultAIHarmBlockThreshold)
+				}
+
+				// check the existence of essential values
+				if conf.TelegramBotToken == nil || conf.GoogleAIAPIKey == nil {
+					err = fmt.Errorf("`telegram_bot_token` and/or `google_ai_api_key` values are missing")
 				}
 			}
 		}
@@ -161,6 +178,11 @@ func standardizeJSON(b []byte) ([]byte, error) {
 	return ast.Pack(), nil
 }
 
+// get the address (pointer) of a value
+func ptr[T any](v T) *T {
+	return &v
+}
+
 // launch bot with given parameters
 func runBot(conf config) {
 	token := conf.TelegramBotToken
@@ -171,10 +193,10 @@ func runBot(conf config) {
 		allowedUsers[user] = true
 	}
 
-	bot := tg.NewClient(token)
+	bot := tg.NewClient(*token)
 
 	ctx := context.Background()
-	client, err := genai.NewClient(ctx, option.WithAPIKey(apiKey))
+	client, err := genai.NewClient(ctx, option.WithAPIKey(*apiKey))
 	if err != nil {
 		log.Printf("failed to create API client: %s", err)
 
@@ -401,9 +423,9 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 
 	var model *genai.GenerativeModel
 	if multimodal {
-		model = client.GenerativeModel(conf.GoogleMultimodalModel)
+		model = client.GenerativeModel(*conf.GoogleMultimodalModel)
 	} else {
-		model = client.GenerativeModel(conf.GoogleGenerativeModel)
+		model = client.GenerativeModel(*conf.GoogleGenerativeModel)
 	}
 
 	// set system instruction
@@ -411,13 +433,13 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 		model.SystemInstruction = &genai.Content{
 			Role: "model",
 			Parts: []genai.Part{
-				genai.Text(systemInstruction),
+				genai.Text(*conf.SystemInstruction),
 			},
 		}
 	}
 
 	// set safety filters
-	model.SafetySettings = safetySettings(genai.HarmBlockThreshold(conf.GoogleAIHarmBlockThreshold))
+	model.SafetySettings = safetySettings(genai.HarmBlockThreshold(*conf.GoogleAIHarmBlockThreshold))
 
 	if conf.StreamMessages {
 		iter := model.GenerateContentStream(ctx, texts...)
@@ -887,7 +909,7 @@ func savePromptAndResult(db *Database, chatID, userID int64, username string, pr
 
 // generate a help message with version info
 func helpMessage(conf config) string {
-	return fmt.Sprintf(msgHelp, conf.GoogleGenerativeModel, conf.GoogleMultimodalModel, version.Build(version.OS|version.Architecture|version.Revision))
+	return fmt.Sprintf(msgHelp, *conf.GoogleGenerativeModel, *conf.GoogleMultimodalModel, version.Build(version.OS|version.Architecture|version.Revision))
 }
 
 // return a /start command handler
