@@ -466,10 +466,8 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 
 				if len(it.Candidates) > 0 {
 					// update number of tokens
-					if numTokensInput < it.UsageMetadata.PromptTokenCount {
-						numTokensInput = it.UsageMetadata.PromptTokenCount
-					}
-					numTokensOutput += it.UsageMetadata.CandidatesTokenCount
+					numTokensInput = it.UsageMetadata.PromptTokenCount
+					numTokensOutput = it.UsageMetadata.TotalTokenCount - it.UsageMetadata.PromptTokenCount
 
 					candidate = it.Candidates[0]
 					content = candidate.Content
@@ -536,10 +534,8 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 
 			if len(generated.Candidates) > 0 {
 				// update number of tokens
-				if numTokensInput < generated.UsageMetadata.PromptTokenCount {
-					numTokensInput = generated.UsageMetadata.PromptTokenCount
-				}
-				numTokensOutput += generated.UsageMetadata.CandidatesTokenCount
+				numTokensInput = generated.UsageMetadata.PromptTokenCount
+				numTokensOutput = generated.UsageMetadata.TotalTokenCount - generated.UsageMetadata.PromptTokenCount
 
 				candidate = generated.Candidates[0]
 				content = candidate.Content
