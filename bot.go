@@ -390,6 +390,7 @@ func sendFile(bot *tg.Bot, conf config, data []byte, chatID int64, messageID *in
 	return sentMessageID, err
 }
 
+/*
 // count tokens
 func countTokens(ctx context.Context, model *genai.GenerativeModel, parts ...genai.Part) (count int32, err error) {
 	if len(parts) == 0 {
@@ -402,6 +403,7 @@ func countTokens(ctx context.Context, model *genai.GenerativeModel, parts ...gen
 	}
 	return count, err
 }
+*/
 
 // generate an answer to given message and send it to the chat
 func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config, db *Database, messages []chatMessage, chatID, userID int64, username string, messageID int64) {
@@ -441,6 +443,10 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 	// set safety filters
 	model.SafetySettings = safetySettings(genai.HarmBlockThreshold(*conf.GoogleAIHarmBlockThreshold))
 
+	// number of tokens for logging
+	var numTokensInput int32 = 0
+	var numTokensOutput int32 = 0
+
 	if conf.StreamMessages {
 		iter := model.GenerateContentStream(ctx, texts...)
 
@@ -450,19 +456,27 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 
 		var firstMessageID *int64 = nil
 		mergedText := ""
-		mergedParts := []genai.Part{}
+		//mergedParts := []genai.Part{}
 
 		for {
 			if it, err := iter.Next(); err == nil {
+				var candidate *genai.Candidate
 				var content *genai.Content
 				var parts []genai.Part
 
 				if len(it.Candidates) > 0 {
-					content = it.Candidates[0].Content
+					// update number of tokens
+					if numTokensInput < it.UsageMetadata.PromptTokenCount {
+						numTokensInput = it.UsageMetadata.PromptTokenCount
+					}
+					numTokensOutput += it.UsageMetadata.CandidatesTokenCount
+
+					candidate = it.Candidates[0]
+					content = candidate.Content
 
 					if len(content.Parts) > 0 {
 						parts = content.Parts
-						mergedParts = append(mergedParts, parts...)
+						//mergedParts = append(mergedParts, parts...)
 					}
 				}
 
@@ -500,8 +514,6 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 		}
 
 		// log if it was successful or not
-		numTokensInput, _ := countTokens(ctx, model, texts...)
-		numTokensOutput, _ := countTokens(ctx, model, mergedParts...)
 		successful := (func() bool {
 			if firstMessageID != nil {
 				// leave a reaction on the first message for notifying the termination of the stream
@@ -518,11 +530,19 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 				log.Printf("[verbose] %+v ===> %+v", messages, generated)
 			}
 
+			var candidate *genai.Candidate
 			var content *genai.Content
 			var parts []genai.Part
 
 			if len(generated.Candidates) > 0 {
-				content = generated.Candidates[0].Content
+				// update number of tokens
+				if numTokensInput < generated.UsageMetadata.PromptTokenCount {
+					numTokensInput = generated.UsageMetadata.PromptTokenCount
+				}
+				numTokensOutput += generated.UsageMetadata.CandidatesTokenCount
+
+				candidate = generated.Candidates[0]
+				content = candidate.Content
 
 				if len(content.Parts) > 0 {
 					parts = content.Parts
@@ -548,18 +568,12 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 							// leave a reaction on the sent message
 							_ = bot.SetMessageReaction(chatID, sentMessageID, tg.NewMessageReactionWithEmoji("👌"))
 
-							numTokensInput, _ := countTokens(ctx, model, texts...)
-							numTokensOutput, _ := countTokens(ctx, model, parts...)
-
 							// save to database (successful)
 							savePromptAndResult(db, chatID, userID, username, messagesToPrompt(messages), uint(numTokensInput), generatedText, uint(numTokensOutput), true)
 						} else {
 							log.Printf("failed to answer messages '%+v' with '%s' as file: %s", messages, parts, err)
 
 							_, _ = sendMessage(bot, conf, "Failed to send you the answer as a text file. See the server logs for more information.", chatID, &messageID)
-
-							numTokensInput, _ := countTokens(ctx, model, texts...)
-							numTokensOutput, _ := countTokens(ctx, model, parts...)
 
 							// save to database (error)
 							savePromptAndResult(db, chatID, userID, username, messagesToPrompt(messages), uint(numTokensInput), err.Error(), uint(numTokensOutput), false)
@@ -569,18 +583,12 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 							// leave a reaction on the sent message
 							_ = bot.SetMessageReaction(chatID, sentMessageID, tg.NewMessageReactionWithEmoji("👌"))
 
-							numTokensInput, _ := countTokens(ctx, model, texts...)
-							numTokensOutput, _ := countTokens(ctx, model, parts...)
-
 							// save to database (successful)
 							savePromptAndResult(db, chatID, userID, username, messagesToPrompt(messages), uint(numTokensInput), generatedText, uint(numTokensOutput), true)
 						} else {
 							log.Printf("failed to answer messages '%+v' with '%+v': %s", messages, parts, err)
 
 							_, _ = sendMessage(bot, conf, "Failed to send you the answer as a text. See the server logs for more information.", chatID, &messageID)
-
-							numTokensInput, _ := countTokens(ctx, model, texts...)
-							numTokensOutput, _ := countTokens(ctx, model, parts...)
 
 							// save to database (error)
 							savePromptAndResult(db, chatID, userID, username, messagesToPrompt(messages), uint(numTokensInput), err.Error(), uint(numTokensOutput), false)
@@ -592,9 +600,6 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 						// leave a reaction on the sent message
 						_ = bot.SetMessageReaction(chatID, sentMessageID, tg.NewMessageReactionWithEmoji("👌"))
 
-						numTokensInput, _ := countTokens(ctx, model, texts...)
-						numTokensOutput, _ := countTokens(ctx, model, parts...)
-
 						generatedText := fmt.Sprintf("%d bytes of %s", len(blob.Data), blob.MIMEType)
 
 						// save to database (successful)
@@ -603,9 +608,6 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 						log.Printf("failed to answer messages '%+v' with '%s' as file: %s", messages, parts, err)
 
 						_, _ = sendMessage(bot, conf, "Failed to send you the answer as a text file. See the server logs for more information.", chatID, &messageID)
-
-						numTokensInput, _ := countTokens(ctx, model, texts...)
-						numTokensOutput, _ := countTokens(ctx, model, parts...)
 
 						// save to database (error)
 						savePromptAndResult(db, chatID, userID, username, messagesToPrompt(messages), uint(numTokensInput), err.Error(), uint(numTokensOutput), false)
