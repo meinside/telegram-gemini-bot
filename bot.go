@@ -34,7 +34,7 @@ const (
 
 	defaultPromptForMedias = "Describe provided media(s)."
 
-	defaultSystemInstruction = "You are a Telegram bot with a backend system which uses the Google Gemini API. Respond to the user's message as precisely as possible."
+	defaultSystemInstruction = "You are a Telegram bot with a backend system which uses the Google Gemini API. Respond to the user's message as precisely as possible. Your response must be in plain text."
 )
 
 const (
@@ -64,7 +64,7 @@ const (
 type chatMessageRole string
 
 const (
-	chatMessageRoleModel chatMessageRole = "model" // for system instruction
+	chatMessageRoleModel chatMessageRole = "model"
 	chatMessageRoleUser  chatMessageRole = "user"
 )
 
@@ -458,7 +458,7 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 	}
 
 	// set system instruction
-	if !multimodal {
+	if !multimodal { // NOTE: FIXME: some multimodal models (eg. `gemini-pro-vision`) do not support system instructions yet
 		model.SystemInstruction = &genai.Content{
 			Role: string(chatMessageRoleModel),
 			Parts: []genai.Part{
