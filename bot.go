@@ -310,6 +310,7 @@ func usableMessageFromUpdate(update tg.Update) (message *tg.Message) {
 		(update.Message.HasText() ||
 			update.Message.HasPhoto() ||
 			update.Message.HasVideo() ||
+			update.Message.HasVideoNote() ||
 			update.Message.HasAudio() ||
 			update.Message.HasDocument()) {
 		message = update.Message
@@ -317,6 +318,7 @@ func usableMessageFromUpdate(update tg.Update) (message *tg.Message) {
 		(update.EditedMessage.HasText() ||
 			update.EditedMessage.HasPhoto() ||
 			update.EditedMessage.HasVideo() ||
+			update.EditedMessage.HasVideoNote() ||
 			update.EditedMessage.HasAudio() ||
 			update.EditedMessage.HasDocument()) {
 		message = update.EditedMessage
@@ -694,7 +696,7 @@ func userNameFromUpdate(update tg.Update) string {
 
 // get original message which was replied by given `message`
 func repliedToMessage(message tg.Message) *tg.Message {
-	if message.ReplyToMessage != nil {
+	if message.HasReplyToMessage() {
 		return message.ReplyToMessage
 	}
 
@@ -707,7 +709,7 @@ func repliedToMessage(message tg.Message) *tg.Message {
 //
 // (if it was sent from bot, make it an assistant's message)
 func convertMessage(bot *tg.Bot, message tg.Message) *chatMessage {
-	if message.ViaBot != nil && message.ViaBot.IsBot {
+	if message.IsBot() {
 		if message.HasPhoto() {
 			var text string
 			if message.HasCaption() {
@@ -751,6 +753,23 @@ func convertMessage(bot *tg.Bot, message tg.Message) *chatMessage {
 				}
 			} else {
 				log.Printf("failed to read video content for assistant message: %s", err)
+			}
+		} else if message.HasVideoNote() {
+			var text string
+			if message.HasCaption() {
+				text = *message.Caption
+			} else {
+				text = defaultPromptForMedias
+			}
+
+			if bytes, err := videoNoteBytes(bot, message.VideoNote); err == nil {
+				return &chatMessage{
+					role:  chatMessageRoleAssistant,
+					text:  text,
+					files: [][]byte{bytes},
+				}
+			} else {
+				log.Printf("failed to read video note content for assistant message: %s", err)
 			}
 		} else if message.HasAudio() {
 			var text string
@@ -833,6 +852,23 @@ func convertMessage(bot *tg.Bot, message tg.Message) *chatMessage {
 		} else {
 			log.Printf("failed to read video content for user message: %s", err)
 		}
+	} else if message.HasVideoNote() {
+		var text string
+		if message.HasCaption() {
+			text = *message.Caption
+		} else {
+			text = defaultPromptForMedias
+		}
+
+		if bytes, err := videoNoteBytes(bot, message.VideoNote); err == nil {
+			return &chatMessage{
+				role:  chatMessageRoleUser,
+				text:  text,
+				files: [][]byte{bytes},
+			}
+		} else {
+			log.Printf("failed to read video note content for user message: %s", err)
+		}
 	} else if message.HasAudio() {
 		var text string
 		if message.HasCaption() {
@@ -888,6 +924,18 @@ func photoBytes(bot *tg.Bot, photo *tg.PhotoSize) (result []byte, err error) {
 func videoBytes(bot *tg.Bot, video *tg.Video) (result []byte, err error) {
 	if res := bot.GetFile(video.FileID); !res.Ok {
 		err = fmt.Errorf("Failed to get video: %s", *res.Description)
+	} else {
+		fileURL := bot.GetFileURL(*res.Result)
+		result, err = readFileContentAtURL(fileURL)
+	}
+
+	return result, err
+}
+
+// read bytes from given video note
+func videoNoteBytes(bot *tg.Bot, videoNote *tg.VideoNote) (result []byte, err error) {
+	if res := bot.GetFile(videoNote.FileID); !res.Ok {
+		err = fmt.Errorf("Failed to get video note: %s", *res.Description)
 	} else {
 		fileURL := bot.GetFileURL(*res.Result)
 		result, err = readFileContentAtURL(fileURL)

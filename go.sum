@@ -72,8 +72,8 @@ github.com/mattn/go-sqlite3 v1.14.22 h1:2gZY6PC6kBnID23Tichd1K+Z0oS6nE/XwU+Vz/5o
 github.com/mattn/go-sqlite3 v1.14.22/go.mod h1:Uh1q+B4BYcTPb+yiD3kU8Ct7aC0hY9fxUwlHK0RXw+Y=
 github.com/meinside/infisical-go v0.3.1 h1:uonT58566vEnILAdQnVR3xuJQtJAf6meVcEF/f0q5qM=
 github.com/meinside/infisical-go v0.3.1/go.mod h1:djjoLo50nAHY1Ron+/YfLUov9wT0nBVYkWuMvdd63pQ=
-github.com/meinside/telegram-bot-go v0.10.8 h1:cqCX2iw9+YsbTxjJztoH6gnQYWV0CIvxtH//w+PbpwA=
-github.com/meinside/telegram-bot-go v0.10.8/go.mod h1:i9gGJrrfhdAIElC/HCUprMmccGjMKPVq52av4n54Y2s=
+github.com/meinside/telegram-bot-go v0.10.9 h1:9cwECkhI0VP54Y4EaBsNj5FUNUFtHgHvQQL0/Rg47Kk=
+github.com/meinside/telegram-bot-go v0.10.9/go.mod h1:i9gGJrrfhdAIElC/HCUprMmccGjMKPVq52av4n54Y2s=
 github.com/meinside/version-go v0.0.3 h1:GXSwi6sTmgpnSR09jAAqDGWeX2Nq52fe5xpitgAhQfM=
 github.com/meinside/version-go v0.0.3/go.mod h1:mFvlwbro1E126u4rU727CcHNa8OPFyhq+KDYYNysFj4=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
