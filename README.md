@@ -137,6 +137,7 @@ and `systemctl` enable|start|restart|stop the service.
 
 ## Commands
 
+- `/stats` for various statistics of this bot.
 - `/help` for help message.
 
 ## Todos / Known Issues
@@ -148,6 +149,7 @@ and `systemctl` enable|start|restart|stop the service.
 - [X] Add ways of informing users about the status of background processes.
   - Will add reactions on successfully received or generated messages.
 - [ ] Handle markdown texts gracefully.
+- [ ] Video files are not processed properly. (times out, or errors out with http 503)
 
 ## License
 
