@@ -32,8 +32,7 @@ const (
 	defaultMultimodalModel      = "gemini-pro-vision"
 	defaultAIHarmBlockThreshold = 3
 
-	defaultPromptForPhotos   = "Describe provided image(s)."
-	defaultPromptForDocument = "Describe provided document."
+	defaultPromptForMedias = "Describe provided media(s)."
 
 	defaultSystemInstruction = "You are a Telegram bot with a backend system which uses the Google Gemini API. Respond to the user's message as precisely as possible."
 )
@@ -58,6 +57,8 @@ const (
 - models: %s / %s
 - version: %s
 `
+
+	defaultAnswerTimeoutSeconds = 180 // 3 minutes
 )
 
 type chatMessageRole string
@@ -87,6 +88,7 @@ type config struct {
 	AllowedTelegramUsers  []string `json:"allowed_telegram_users"`
 	RequestLogsDBFilepath string   `json:"db_filepath,omitempty"`
 	StreamMessages        bool     `json:"stream_messages,omitempty"`
+	AnswerTimeoutSeconds  int      `json:"answer_timeout_seconds,omitempty"`
 	Verbose               bool     `json:"verbose,omitempty"`
 
 	// telegram bot and google api tokens
@@ -154,6 +156,9 @@ func loadConfig(fpath string) (conf config, err error) {
 				}
 				if conf.GoogleAIHarmBlockThreshold == nil {
 					conf.GoogleAIHarmBlockThreshold = ptr(defaultAIHarmBlockThreshold)
+				}
+				if conf.AnswerTimeoutSeconds == 0 {
+					conf.AnswerTimeoutSeconds = defaultAnswerTimeoutSeconds
 				}
 
 				// check the existence of essential values
@@ -279,7 +284,14 @@ func handleMessage(ctx context.Context, bot *tg.Bot, client *genai.Client, conf 
 	if msg := usableMessageFromUpdate(update); msg != nil {
 		messages := chatMessagesFromTGMessage(bot, *msg)
 		if len(messages) > 0 {
+			ctx, cancel := context.WithTimeout(ctx, time.Duration(conf.AnswerTimeoutSeconds)*time.Second)
+			defer cancel()
+
 			answer(ctx, bot, client, conf, db, messages, chatID, userID, userNameFromUpdate(update), messageID)
+
+			if err := ctx.Err(); err != nil {
+				_, _ = sendMessage(bot, conf, fmt.Sprintf("Failed to generate an answer from Gemini in %d seconds: %s", conf.AnswerTimeoutSeconds, err), chatID, &messageID)
+			}
 
 			return
 		} else {
@@ -294,9 +306,19 @@ func handleMessage(ctx context.Context, bot *tg.Bot, client *genai.Client, conf 
 
 // get usable message from given update
 func usableMessageFromUpdate(update tg.Update) (message *tg.Message) {
-	if update.HasMessage() && (update.Message.HasText() || update.Message.HasPhoto() || update.Message.HasDocument()) {
+	if update.HasMessage() &&
+		(update.Message.HasText() ||
+			update.Message.HasPhoto() ||
+			update.Message.HasVideo() ||
+			update.Message.HasAudio() ||
+			update.Message.HasDocument()) {
 		message = update.Message
-	} else if update.HasEditedMessage() && (update.EditedMessage.HasText() || update.EditedMessage.HasPhoto() || update.EditedMessage.HasDocument()) {
+	} else if update.HasEditedMessage() &&
+		(update.EditedMessage.HasText() ||
+			update.EditedMessage.HasPhoto() ||
+			update.EditedMessage.HasVideo() ||
+			update.EditedMessage.HasAudio() ||
+			update.EditedMessage.HasDocument()) {
 		message = update.EditedMessage
 	}
 
@@ -685,14 +707,13 @@ func repliedToMessage(message tg.Message) *tg.Message {
 //
 // (if it was sent from bot, make it an assistant's message)
 func convertMessage(bot *tg.Bot, message tg.Message) *chatMessage {
-	if message.ViaBot != nil &&
-		message.ViaBot.IsBot {
+	if message.ViaBot != nil && message.ViaBot.IsBot {
 		if message.HasPhoto() {
 			var text string
 			if message.HasCaption() {
 				text = *message.Caption
 			} else {
-				text = defaultPromptForPhotos
+				text = defaultPromptForMedias
 			}
 
 			photos := [][]byte{}
@@ -714,12 +735,46 @@ func convertMessage(bot *tg.Bot, message tg.Message) *chatMessage {
 				role: chatMessageRoleAssistant,
 				text: *message.Text,
 			}
+		} else if message.HasVideo() {
+			var text string
+			if message.HasCaption() {
+				text = *message.Caption
+			} else {
+				text = defaultPromptForMedias
+			}
+
+			if bytes, err := videoBytes(bot, message.Video); err == nil {
+				return &chatMessage{
+					role:  chatMessageRoleAssistant,
+					text:  text,
+					files: [][]byte{bytes},
+				}
+			} else {
+				log.Printf("failed to read video content for assistant message: %s", err)
+			}
+		} else if message.HasAudio() {
+			var text string
+			if message.HasCaption() {
+				text = *message.Caption
+			} else {
+				text = defaultPromptForMedias
+			}
+
+			if bytes, err := audioBytes(bot, message.Audio); err == nil {
+				return &chatMessage{
+					role:  chatMessageRoleAssistant,
+					text:  text,
+					files: [][]byte{bytes},
+				}
+			} else {
+				log.Printf("failed to read audio content for assistant message: %s", err)
+			}
 		} else if message.HasDocument() {
 			var text string
 			if message.HasCaption() {
 				text = *message.Caption
 			} else {
-				text = defaultPromptForDocument
+				text = defaultPromptForMedias
 			}
 
 			if bytes, err := documentBytes(bot, message.Document); err == nil {
@@ -739,7 +794,7 @@ func convertMessage(bot *tg.Bot, message tg.Message) *chatMessage {
 		if message.HasCaption() {
 			text = *message.Caption
 		} else {
-			text = defaultPromptForPhotos
+			text = defaultPromptForMedias
 		}
 
 		photos := [][]byte{}
@@ -761,12 +816,46 @@ func convertMessage(bot *tg.Bot, message tg.Message) *chatMessage {
 			role: chatMessageRoleUser,
 			text: *message.Text,
 		}
+	} else if message.HasVideo() {
+		var text string
+		if message.HasCaption() {
+			text = *message.Caption
+		} else {
+			text = defaultPromptForMedias
+		}
+
+		if bytes, err := videoBytes(bot, message.Video); err == nil {
+			return &chatMessage{
+				role:  chatMessageRoleUser,
+				text:  text,
+				files: [][]byte{bytes},
+			}
+		} else {
+			log.Printf("failed to read video content for user message: %s", err)
+		}
+	} else if message.HasAudio() {
+		var text string
+		if message.HasCaption() {
+			text = *message.Caption
+		} else {
+			text = defaultPromptForMedias
+		}
+
+		if bytes, err := audioBytes(bot, message.Audio); err == nil {
+			return &chatMessage{
+				role:  chatMessageRoleUser,
+				text:  text,
+				files: [][]byte{bytes},
+			}
+		} else {
+			log.Printf("failed to read audio content for user message: %s", err)
+		}
 	} else if message.HasDocument() {
 		var text string
 		if message.HasCaption() {
 			text = *message.Caption
 		} else {
-			text = defaultPromptForDocument
+			text = defaultPromptForMedias
 		}
 
 		if bytes, err := documentBytes(bot, message.Document); err == nil {
@@ -787,6 +876,30 @@ func convertMessage(bot *tg.Bot, message tg.Message) *chatMessage {
 func photoBytes(bot *tg.Bot, photo *tg.PhotoSize) (result []byte, err error) {
 	if res := bot.GetFile(photo.FileID); !res.Ok {
 		err = fmt.Errorf("Failed to get photo: %s", *res.Description)
+	} else {
+		fileURL := bot.GetFileURL(*res.Result)
+		result, err = readFileContentAtURL(fileURL)
+	}
+
+	return result, err
+}
+
+// read bytes from given video
+func videoBytes(bot *tg.Bot, video *tg.Video) (result []byte, err error) {
+	if res := bot.GetFile(video.FileID); !res.Ok {
+		err = fmt.Errorf("Failed to get video: %s", *res.Description)
+	} else {
+		fileURL := bot.GetFileURL(*res.Result)
+		result, err = readFileContentAtURL(fileURL)
+	}
+
+	return result, err
+}
+
+// read bytes from given audio
+func audioBytes(bot *tg.Bot, audio *tg.Audio) (result []byte, err error) {
+	if res := bot.GetFile(audio.FileID); !res.Ok {
+		err = fmt.Errorf("Failed to get audio: %s", *res.Description)
 	} else {
 		fileURL := bot.GetFileURL(*res.Result)
 		result, err = readFileContentAtURL(fileURL)
