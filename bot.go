@@ -64,8 +64,8 @@ const (
 type chatMessageRole string
 
 const (
-	chatMessageRoleUser      = "user"
-	chatMessageRoleAssistant = "assistant"
+	chatMessageRoleModel chatMessageRole = "model" // for system instruction
+	chatMessageRoleUser  chatMessageRole = "user"
 )
 
 type chatMessage struct {
@@ -282,12 +282,12 @@ func handleMessage(ctx context.Context, bot *tg.Bot, client *genai.Client, conf 
 	messageID := message.MessageID
 
 	if msg := usableMessageFromUpdate(update); msg != nil {
-		messages := chatMessagesFromTGMessage(bot, *msg)
-		if len(messages) > 0 {
+		parent, original := chatMessagesFromTGMessage(bot, *msg)
+		if original != nil {
 			ctx, cancel := context.WithTimeout(ctx, time.Duration(conf.AnswerTimeoutSeconds)*time.Second)
 			defer cancel()
 
-			answer(ctx, bot, client, conf, db, messages, chatID, userID, userNameFromUpdate(update), messageID)
+			answer(ctx, bot, client, conf, db, parent, original, chatID, userID, userNameFromUpdate(update), messageID)
 
 			if err := ctx.Err(); err != nil {
 				_, _ = sendMessage(bot, conf, fmt.Sprintf("Failed to generate an answer from Gemini in %d seconds: %s", conf.AnswerTimeoutSeconds, err), chatID, &messageID)
@@ -328,24 +328,22 @@ func usableMessageFromUpdate(update tg.Update) (message *tg.Message) {
 }
 
 // convert telegram bot message into chat messages
-func chatMessagesFromTGMessage(bot *tg.Bot, message tg.Message) (chatMessages []chatMessage) {
-	chatMessages = []chatMessage{}
-
+func chatMessagesFromTGMessage(bot *tg.Bot, message tg.Message) (parent, original *chatMessage) {
 	replyTo := repliedToMessage(message)
 
-	// chat message 1
+	// chat message 1 (parent message)
 	if replyTo != nil {
 		if chatMessage := convertMessage(bot, *replyTo); chatMessage != nil {
-			chatMessages = append(chatMessages, *chatMessage)
+			parent = chatMessage
 		}
 	}
 
-	// chat message 2
+	// chat message 2 (original message)
 	if chatMessage := convertMessage(bot, message); chatMessage != nil {
-		chatMessages = append(chatMessages, *chatMessage)
+		original = chatMessage
 	}
 
-	return chatMessages
+	return parent, original
 }
 
 // send given text to the chat
@@ -430,16 +428,21 @@ func countTokens(ctx context.Context, model *genai.GenerativeModel, parts ...gen
 */
 
 // generate an answer to given message and send it to the chat
-func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config, db *Database, messages []chatMessage, chatID, userID int64, username string, messageID int64) {
+func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config, db *Database, parent, original *chatMessage, chatID, userID int64, username string, messageID int64) {
 	// leave a reaction on the original message for confirmation
 	_ = bot.SetMessageReaction(chatID, messageID, tg.NewMessageReactionWithEmoji("👌"))
 
 	multimodal := false
-	texts := []genai.Part{}
-	for _, message := range messages {
-		texts = append(texts, genai.Text(message.text))
-		for _, file := range message.files {
-			texts = append(texts, genai.Blob{
+
+	// prompt
+	prompt := []genai.Part{}
+	if original != nil {
+		// text
+		prompt = append(prompt, genai.Text(original.text))
+
+		// files
+		for _, file := range original.files {
+			prompt = append(prompt, genai.Blob{
 				MIMEType: http.DetectContentType(file),
 				Data:     file,
 			})
@@ -457,11 +460,35 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 	// set system instruction
 	if !multimodal {
 		model.SystemInstruction = &genai.Content{
-			Role: "model",
+			Role: string(chatMessageRoleModel),
 			Parts: []genai.Part{
 				genai.Text(*conf.SystemInstruction),
 			},
 		}
+	}
+
+	// set history
+	session := model.StartChat()
+	if parent != nil {
+		session.History = []*genai.Content{}
+
+		// text
+		parts := []genai.Part{
+			genai.Text(parent.text),
+		}
+
+		// files
+		for _, file := range parent.files {
+			parts = append(parts, genai.Blob{
+				MIMEType: http.DetectContentType(file),
+				Data:     file,
+			})
+		}
+
+		session.History = append(session.History, &genai.Content{
+			Role:  string(chatMessageRoleModel),
+			Parts: parts,
+		})
 	}
 
 	// set safety filters
@@ -472,15 +499,14 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 	var numTokensOutput int32 = 0
 
 	if conf.StreamMessages {
-		iter := model.GenerateContentStream(ctx, texts...)
+		iter := session.SendMessageStream(ctx, prompt...)
 
 		if conf.Verbose {
-			log.Printf("[verbose] streaming %+v ===> %+v", messages, iter)
+			log.Printf("[verbose] streaming [%+v + %+v] ===> %+v", parent, original, iter)
 		}
 
 		var firstMessageID *int64 = nil
 		mergedText := ""
-		//mergedParts := []genai.Part{}
 
 		for {
 			if it, err := iter.Next(); err == nil {
@@ -498,7 +524,6 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 
 					if len(content.Parts) > 0 {
 						parts = content.Parts
-						//mergedParts = append(mergedParts, parts...)
 					}
 				}
 
@@ -515,12 +540,12 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 							if sentMessageID, err := sendMessage(bot, conf, generatedText, chatID, &messageID); err == nil {
 								firstMessageID = &sentMessageID
 							} else {
-								log.Printf("failed to send stream messages '%+v' with '%+v': %s", messages, parts, err)
+								log.Printf("failed to send stream messages [%+v + %+v] with '%+v': %s", parent, original, parts, err)
 							}
 						} else { // update the first message
 							// update the first message (append text)
 							if err := updateMessage(bot, conf, mergedText, chatID, *firstMessageID); err != nil {
-								log.Printf("failed to update stream messages '%+v' with '%+v': %s", messages, parts, err)
+								log.Printf("failed to update stream messages [%+v + %+v] with '%+v': %s", parent, original, parts, err)
 							}
 						}
 					} else {
@@ -545,11 +570,11 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 			}
 			return false
 		})()
-		savePromptAndResult(db, chatID, userID, username, messagesToPrompt(messages), uint(numTokensInput), mergedText, uint(numTokensOutput), successful)
+		savePromptAndResult(db, chatID, userID, username, messagesToPrompt(parent, original), uint(numTokensInput), mergedText, uint(numTokensOutput), successful)
 	} else {
-		if generated, err := model.GenerateContent(ctx, texts...); err == nil {
+		if generated, err := session.SendMessage(ctx, prompt...); err == nil {
 			if conf.Verbose {
-				log.Printf("[verbose] %+v ===> %+v", messages, generated)
+				log.Printf("[verbose] [%+v + %+v] ===> %+v", parent, original, generated)
 			}
 
 			var candidate *genai.Candidate
@@ -589,14 +614,14 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 							_ = bot.SetMessageReaction(chatID, sentMessageID, tg.NewMessageReactionWithEmoji("👌"))
 
 							// save to database (successful)
-							savePromptAndResult(db, chatID, userID, username, messagesToPrompt(messages), uint(numTokensInput), generatedText, uint(numTokensOutput), true)
+							savePromptAndResult(db, chatID, userID, username, messagesToPrompt(parent, original), uint(numTokensInput), generatedText, uint(numTokensOutput), true)
 						} else {
-							log.Printf("failed to answer messages '%+v' with '%s' as file: %s", messages, parts, err)
+							log.Printf("failed to answer messages [%+v + %+v] with '%s' as file: %s", parent, original, parts, err)
 
 							_, _ = sendMessage(bot, conf, "Failed to send you the answer as a text file. See the server logs for more information.", chatID, &messageID)
 
 							// save to database (error)
-							savePromptAndResult(db, chatID, userID, username, messagesToPrompt(messages), uint(numTokensInput), err.Error(), uint(numTokensOutput), false)
+							savePromptAndResult(db, chatID, userID, username, messagesToPrompt(parent, original), uint(numTokensInput), err.Error(), uint(numTokensOutput), false)
 						}
 					} else {
 						if sentMessageID, err := sendMessage(bot, conf, generatedText, chatID, &messageID); err == nil {
@@ -604,14 +629,14 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 							_ = bot.SetMessageReaction(chatID, sentMessageID, tg.NewMessageReactionWithEmoji("👌"))
 
 							// save to database (successful)
-							savePromptAndResult(db, chatID, userID, username, messagesToPrompt(messages), uint(numTokensInput), generatedText, uint(numTokensOutput), true)
+							savePromptAndResult(db, chatID, userID, username, messagesToPrompt(parent, original), uint(numTokensInput), generatedText, uint(numTokensOutput), true)
 						} else {
-							log.Printf("failed to answer messages '%+v' with '%+v': %s", messages, parts, err)
+							log.Printf("failed to answer messages [%+v + %+v] with '%+v': %s", parent, original, parts, err)
 
 							_, _ = sendMessage(bot, conf, "Failed to send you the answer as a text. See the server logs for more information.", chatID, &messageID)
 
 							// save to database (error)
-							savePromptAndResult(db, chatID, userID, username, messagesToPrompt(messages), uint(numTokensInput), err.Error(), uint(numTokensOutput), false)
+							savePromptAndResult(db, chatID, userID, username, messagesToPrompt(parent, original), uint(numTokensInput), err.Error(), uint(numTokensOutput), false)
 						}
 					}
 				} else if blob, ok := part.(genai.Blob); ok { // (blob)
@@ -623,14 +648,14 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 						generatedText := fmt.Sprintf("%d bytes of %s", len(blob.Data), blob.MIMEType)
 
 						// save to database (successful)
-						savePromptAndResult(db, chatID, userID, username, messagesToPrompt(messages), uint(numTokensInput), generatedText, uint(numTokensOutput), true)
+						savePromptAndResult(db, chatID, userID, username, messagesToPrompt(parent, original), uint(numTokensInput), generatedText, uint(numTokensOutput), true)
 					} else {
-						log.Printf("failed to answer messages '%+v' with '%s' as file: %s", messages, parts, err)
+						log.Printf("failed to answer messages [%+v + %+v] with '%s' as file: %s", parent, original, parts, err)
 
 						_, _ = sendMessage(bot, conf, "Failed to send you the answer as a text file. See the server logs for more information.", chatID, &messageID)
 
 						// save to database (error)
-						savePromptAndResult(db, chatID, userID, username, messagesToPrompt(messages), uint(numTokensInput), err.Error(), uint(numTokensOutput), false)
+						savePromptAndResult(db, chatID, userID, username, messagesToPrompt(parent, original), uint(numTokensInput), err.Error(), uint(numTokensOutput), false)
 					}
 				} else {
 					log.Printf("unsupported type of part: %+v", part)
@@ -642,7 +667,7 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 			_, _ = sendMessage(bot, conf, fmt.Sprintf("Failed to generate an answer from Gemini: %s", err), chatID, &messageID)
 
 			// save to database (error)
-			savePromptAndResult(db, chatID, userID, username, messagesToPrompt(messages), 0, err.Error(), 0, false)
+			savePromptAndResult(db, chatID, userID, username, messagesToPrompt(parent, original), 0, err.Error(), 0, false)
 		}
 	}
 }
@@ -709,103 +734,11 @@ func repliedToMessage(message tg.Message) *tg.Message {
 //
 // (if it was sent from bot, make it an assistant's message)
 func convertMessage(bot *tg.Bot, message tg.Message) *chatMessage {
+	var role chatMessageRole
 	if message.IsBot() {
-		if message.HasPhoto() {
-			var text string
-			if message.HasCaption() {
-				text = *message.Caption
-			} else {
-				text = defaultPromptForMedias
-			}
-
-			photos := [][]byte{}
-			for _, photo := range message.Photo {
-				if bytes, err := photoBytes(bot, &photo); err == nil {
-					photos = append(photos, bytes)
-				} else {
-					log.Printf("failed to read photo content for assistant message: %s", err)
-				}
-			}
-
-			return &chatMessage{
-				role:  chatMessageRoleAssistant,
-				text:  text,
-				files: photos,
-			}
-		} else if message.HasText() {
-			return &chatMessage{
-				role: chatMessageRoleAssistant,
-				text: *message.Text,
-			}
-		} else if message.HasVideo() {
-			var text string
-			if message.HasCaption() {
-				text = *message.Caption
-			} else {
-				text = defaultPromptForMedias
-			}
-
-			if bytes, err := videoBytes(bot, message.Video); err == nil {
-				return &chatMessage{
-					role:  chatMessageRoleAssistant,
-					text:  text,
-					files: [][]byte{bytes},
-				}
-			} else {
-				log.Printf("failed to read video content for assistant message: %s", err)
-			}
-		} else if message.HasVideoNote() {
-			var text string
-			if message.HasCaption() {
-				text = *message.Caption
-			} else {
-				text = defaultPromptForMedias
-			}
-
-			if bytes, err := videoNoteBytes(bot, message.VideoNote); err == nil {
-				return &chatMessage{
-					role:  chatMessageRoleAssistant,
-					text:  text,
-					files: [][]byte{bytes},
-				}
-			} else {
-				log.Printf("failed to read video note content for assistant message: %s", err)
-			}
-		} else if message.HasAudio() {
-			var text string
-			if message.HasCaption() {
-				text = *message.Caption
-			} else {
-				text = defaultPromptForMedias
-			}
-
-			if bytes, err := audioBytes(bot, message.Audio); err == nil {
-				return &chatMessage{
-					role:  chatMessageRoleAssistant,
-					text:  text,
-					files: [][]byte{bytes},
-				}
-			} else {
-				log.Printf("failed to read audio content for assistant message: %s", err)
-			}
-		} else if message.HasDocument() {
-			var text string
-			if message.HasCaption() {
-				text = *message.Caption
-			} else {
-				text = defaultPromptForMedias
-			}
-
-			if bytes, err := documentBytes(bot, message.Document); err == nil {
-				return &chatMessage{
-					role:  chatMessageRoleAssistant,
-					text:  text,
-					files: [][]byte{bytes},
-				}
-			} else {
-				log.Printf("failed to read document content for assistant message: %s", err)
-			}
-		}
+		role = chatMessageRoleModel
+	} else {
+		role = chatMessageRoleUser
 	}
 
 	if message.HasPhoto() {
@@ -821,18 +754,18 @@ func convertMessage(bot *tg.Bot, message tg.Message) *chatMessage {
 			if bytes, err := photoBytes(bot, &photo); err == nil {
 				photos = append(photos, bytes)
 			} else {
-				log.Printf("failed to read photo content for user message: %s", err)
+				log.Printf("failed to read photo content for %s message: %s", role, err)
 			}
 		}
 
 		return &chatMessage{
-			role:  chatMessageRoleUser,
+			role:  role,
 			text:  text,
 			files: photos,
 		}
 	} else if message.HasText() {
 		return &chatMessage{
-			role: chatMessageRoleUser,
+			role: role,
 			text: *message.Text,
 		}
 	} else if message.HasVideo() {
@@ -845,12 +778,12 @@ func convertMessage(bot *tg.Bot, message tg.Message) *chatMessage {
 
 		if bytes, err := videoBytes(bot, message.Video); err == nil {
 			return &chatMessage{
-				role:  chatMessageRoleUser,
+				role:  role,
 				text:  text,
 				files: [][]byte{bytes},
 			}
 		} else {
-			log.Printf("failed to read video content for user message: %s", err)
+			log.Printf("failed to read video content for %s message: %s", role, err)
 		}
 	} else if message.HasVideoNote() {
 		var text string
@@ -862,12 +795,12 @@ func convertMessage(bot *tg.Bot, message tg.Message) *chatMessage {
 
 		if bytes, err := videoNoteBytes(bot, message.VideoNote); err == nil {
 			return &chatMessage{
-				role:  chatMessageRoleUser,
+				role:  role,
 				text:  text,
 				files: [][]byte{bytes},
 			}
 		} else {
-			log.Printf("failed to read video note content for user message: %s", err)
+			log.Printf("failed to read video note content for %s message: %s", role, err)
 		}
 	} else if message.HasAudio() {
 		var text string
@@ -879,12 +812,12 @@ func convertMessage(bot *tg.Bot, message tg.Message) *chatMessage {
 
 		if bytes, err := audioBytes(bot, message.Audio); err == nil {
 			return &chatMessage{
-				role:  chatMessageRoleUser,
+				role:  role,
 				text:  text,
 				files: [][]byte{bytes},
 			}
 		} else {
-			log.Printf("failed to read audio content for user message: %s", err)
+			log.Printf("failed to read audio content for %s message: %s", role, err)
 		}
 	} else if message.HasDocument() {
 		var text string
@@ -896,12 +829,12 @@ func convertMessage(bot *tg.Bot, message tg.Message) *chatMessage {
 
 		if bytes, err := documentBytes(bot, message.Document); err == nil {
 			return &chatMessage{
-				role:  chatMessageRoleUser,
+				role:  role,
 				text:  text,
 				files: [][]byte{bytes},
 			}
 		} else {
-			log.Printf("failed to read document content for user message: %s", err)
+			log.Printf("failed to read document content for %s message: %s", role, err)
 		}
 	}
 
@@ -990,7 +923,15 @@ func readFileContentAtURL(url string) (content []byte, err error) {
 }
 
 // convert chat messages to a prompt for logging
-func messagesToPrompt(messages []chatMessage) string {
+func messagesToPrompt(parent, original *chatMessage) string {
+	messages := []chatMessage{}
+	if parent != nil {
+		messages = append(messages, *parent)
+	}
+	if original != nil {
+		messages = append(messages, *original)
+	}
+
 	lines := []string{}
 
 	for _, message := range messages {
