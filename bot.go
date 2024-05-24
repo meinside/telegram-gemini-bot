@@ -34,7 +34,7 @@ const (
 
 	defaultPromptForMedias = "Describe provided media(s)."
 
-	defaultSystemInstruction = "You are a Telegram bot with a backend system which uses the Google Gemini API. Respond to the user's message as precisely as possible."
+	defaultSystemInstruction = "You are a Telegram bot with a backend system which uses the Google Gemini API. Respond to the user's message as precisely as possible. Your response must be in plain text."
 )
 
 const (
@@ -59,12 +59,14 @@ const (
 `
 
 	defaultAnswerTimeoutSeconds = 180 // 3 minutes
+
+	readURLContentTimeoutSeconds = 60 // 1 minute
 )
 
 type chatMessageRole string
 
 const (
-	chatMessageRoleModel chatMessageRole = "model" // for system instruction
+	chatMessageRoleModel chatMessageRole = "model"
 	chatMessageRoleUser  chatMessageRole = "user"
 )
 
@@ -312,6 +314,7 @@ func usableMessageFromUpdate(update tg.Update) (message *tg.Message) {
 			update.Message.HasVideo() ||
 			update.Message.HasVideoNote() ||
 			update.Message.HasAudio() ||
+			update.Message.HasVoice() ||
 			update.Message.HasDocument()) {
 		message = update.Message
 	} else if update.HasEditedMessage() &&
@@ -320,6 +323,7 @@ func usableMessageFromUpdate(update tg.Update) (message *tg.Message) {
 			update.EditedMessage.HasVideo() ||
 			update.EditedMessage.HasVideoNote() ||
 			update.EditedMessage.HasAudio() ||
+			update.EditedMessage.HasVoice() ||
 			update.EditedMessage.HasDocument()) {
 		message = update.EditedMessage
 	}
@@ -458,7 +462,7 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 	}
 
 	// set system instruction
-	if !multimodal {
+	if !multimodal { // NOTE: FIXME: some multimodal models (eg. `gemini-pro-vision`) do not support system instructions yet
 		model.SystemInstruction = &genai.Content{
 			Role: string(chatMessageRoleModel),
 			Parts: []genai.Part{
@@ -751,7 +755,7 @@ func convertMessage(bot *tg.Bot, message tg.Message) *chatMessage {
 
 		photos := [][]byte{}
 		for _, photo := range message.Photo {
-			if bytes, err := photoBytes(bot, &photo); err == nil {
+			if bytes, err := readMedia(bot, "photo", photo.FileID); err == nil {
 				photos = append(photos, bytes)
 			} else {
 				log.Printf("failed to read photo content for %s message: %s", role, err)
@@ -776,7 +780,7 @@ func convertMessage(bot *tg.Bot, message tg.Message) *chatMessage {
 			text = defaultPromptForMedias
 		}
 
-		if bytes, err := videoBytes(bot, message.Video); err == nil {
+		if bytes, err := readMedia(bot, "video", message.Video.FileID); err == nil {
 			return &chatMessage{
 				role:  role,
 				text:  text,
@@ -793,7 +797,7 @@ func convertMessage(bot *tg.Bot, message tg.Message) *chatMessage {
 			text = defaultPromptForMedias
 		}
 
-		if bytes, err := videoNoteBytes(bot, message.VideoNote); err == nil {
+		if bytes, err := readMedia(bot, "video note", message.VideoNote.FileID); err == nil {
 			return &chatMessage{
 				role:  role,
 				text:  text,
@@ -810,7 +814,7 @@ func convertMessage(bot *tg.Bot, message tg.Message) *chatMessage {
 			text = defaultPromptForMedias
 		}
 
-		if bytes, err := audioBytes(bot, message.Audio); err == nil {
+		if bytes, err := readMedia(bot, "audio", message.Audio.FileID); err == nil {
 			return &chatMessage{
 				role:  role,
 				text:  text,
@@ -818,6 +822,23 @@ func convertMessage(bot *tg.Bot, message tg.Message) *chatMessage {
 			}
 		} else {
 			log.Printf("failed to read audio content for %s message: %s", role, err)
+		}
+	} else if message.HasVoice() {
+		var text string
+		if message.HasCaption() {
+			text = *message.Caption
+		} else {
+			text = defaultPromptForMedias
+		}
+
+		if bytes, err := readMedia(bot, "voice", message.Voice.FileID); err == nil {
+			return &chatMessage{
+				role:  role,
+				text:  text,
+				files: [][]byte{bytes},
+			}
+		} else {
+			log.Printf("failed to read voice content for %s message: %s", role, err)
 		}
 	} else if message.HasDocument() {
 		var text string
@@ -827,7 +848,7 @@ func convertMessage(bot *tg.Bot, message tg.Message) *chatMessage {
 			text = defaultPromptForMedias
 		}
 
-		if bytes, err := documentBytes(bot, message.Document); err == nil {
+		if bytes, err := readMedia(bot, "document", message.Document.FileID); err == nil {
 			return &chatMessage{
 				role:  role,
 				text:  text,
@@ -841,10 +862,10 @@ func convertMessage(bot *tg.Bot, message tg.Message) *chatMessage {
 	return nil
 }
 
-// read bytes from given photo
-func photoBytes(bot *tg.Bot, photo *tg.PhotoSize) (result []byte, err error) {
-	if res := bot.GetFile(photo.FileID); !res.Ok {
-		err = fmt.Errorf("Failed to get photo: %s", *res.Description)
+// read bytes from given media
+func readMedia(bot *tg.Bot, mediaType, fileID string) (result []byte, err error) {
+	if res := bot.GetFile(fileID); !res.Ok {
+		err = fmt.Errorf("Failed to read bytes from %s: %s", mediaType, *res.Description)
 	} else {
 		fileURL := bot.GetFileURL(*res.Result)
 		result, err = readFileContentAtURL(fileURL)
@@ -853,58 +874,10 @@ func photoBytes(bot *tg.Bot, photo *tg.PhotoSize) (result []byte, err error) {
 	return result, err
 }
 
-// read bytes from given video
-func videoBytes(bot *tg.Bot, video *tg.Video) (result []byte, err error) {
-	if res := bot.GetFile(video.FileID); !res.Ok {
-		err = fmt.Errorf("Failed to get video: %s", *res.Description)
-	} else {
-		fileURL := bot.GetFileURL(*res.Result)
-		result, err = readFileContentAtURL(fileURL)
-	}
-
-	return result, err
-}
-
-// read bytes from given video note
-func videoNoteBytes(bot *tg.Bot, videoNote *tg.VideoNote) (result []byte, err error) {
-	if res := bot.GetFile(videoNote.FileID); !res.Ok {
-		err = fmt.Errorf("Failed to get video note: %s", *res.Description)
-	} else {
-		fileURL := bot.GetFileURL(*res.Result)
-		result, err = readFileContentAtURL(fileURL)
-	}
-
-	return result, err
-}
-
-// read bytes from given audio
-func audioBytes(bot *tg.Bot, audio *tg.Audio) (result []byte, err error) {
-	if res := bot.GetFile(audio.FileID); !res.Ok {
-		err = fmt.Errorf("Failed to get audio: %s", *res.Description)
-	} else {
-		fileURL := bot.GetFileURL(*res.Result)
-		result, err = readFileContentAtURL(fileURL)
-	}
-
-	return result, err
-}
-
-// read bytes from given document
-func documentBytes(bot *tg.Bot, document *tg.Document) (result []byte, err error) {
-	if res := bot.GetFile(document.FileID); !res.Ok {
-		err = fmt.Errorf("Failed to get document: %s", *res.Description)
-	} else {
-		fileURL := bot.GetFileURL(*res.Result)
-		result, err = readFileContentAtURL(fileURL)
-	}
-
-	return result, err
-}
-
-// read file content at given url, will timeout in 60 seconds
+// read file content at given url
 func readFileContentAtURL(url string) (content []byte, err error) {
 	httpClient := http.Client{
-		Timeout: time.Second * 60,
+		Timeout: time.Second * readURLContentTimeoutSeconds,
 	}
 
 	var resp *http.Response
