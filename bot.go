@@ -518,7 +518,9 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 					Data:     file,
 				})
 			} else {
-				if file, err := client.UploadFile(ctx, "", bytes.NewReader(file), &genai.UploadFileOptions{}); err == nil {
+				if file, err := client.UploadFile(ctx, "", bytes.NewReader(file), &genai.UploadFileOptions{
+					MIMEType: mimeType,
+				}); err == nil {
 					prompt = append(prompt, genai.FileData{
 						MIMEType: file.MIMEType,
 						URI:      file.URI,
@@ -556,7 +558,9 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 					Data:     file,
 				})
 			} else {
-				if file, err := client.UploadFile(ctx, "", bytes.NewReader(file), &genai.UploadFileOptions{}); err == nil {
+				if file, err := client.UploadFile(ctx, "", bytes.NewReader(file), &genai.UploadFileOptions{
+					MIMEType: mimeType,
+				}); err == nil {
 					parts = append(parts, genai.FileData{
 						MIMEType: file.MIMEType,
 						URI:      file.URI,
