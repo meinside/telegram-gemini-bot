@@ -148,8 +148,8 @@ and `systemctl` enable|start|restart|stop the service.
   - Will update message texts with streamed messages.
 - [X] Add ways of informing users about the status of background processes.
   - Will add reactions on successfully received or generated messages.
+- [X] Process media files properly.
 - [ ] Handle markdown texts gracefully.
-- [ ] Video files are not processed properly. (times out, or errors out with http 503)
 
 ## License
 

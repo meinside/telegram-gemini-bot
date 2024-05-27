@@ -3,14 +3,17 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/meinside/infisical-go"
@@ -22,6 +25,7 @@ import (
 	"github.com/tailscale/hujson"
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
+	"google.golang.org/api/googleapi"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 )
@@ -61,6 +65,10 @@ const (
 	defaultAnswerTimeoutSeconds = 180 // 3 minutes
 
 	readURLContentTimeoutSeconds = 60 // 1 minute
+
+	uploadedFileStateCheckIntervalMilliseconds = 300
+
+	redactedString = "<REDACTED>"
 )
 
 type chatMessageRole string
@@ -205,7 +213,7 @@ func runBot(conf config) {
 	ctx := context.Background()
 	client, err := genai.NewClient(ctx, option.WithAPIKey(*apiKey))
 	if err != nil {
-		log.Printf("failed to create API client: %s", err)
+		log.Printf("failed to create API client: %s", redact(conf, err))
 
 		os.Exit(1)
 	}
@@ -215,11 +223,27 @@ func runBot(conf config) {
 	if b := bot.GetMe(); b.Ok {
 		log.Printf("launching bot: %s", userName(b.Result))
 
+		// clear things
+		files := client.ListFiles(ctx)
+		for {
+			if file, err := files.Next(); err == nil {
+				if err := client.DeleteFile(ctx, file.Name); err != nil {
+					log.Printf("failed to delete cloud file: %s", err)
+				}
+			} else {
+				if err == iterator.Done {
+					break
+				}
+				log.Printf("failed to iterate cloud files: %s", err)
+			}
+		}
+
+		// database
 		var db *Database = nil
 		if conf.RequestLogsDBFilepath != "" {
 			var err error
 			if db, err = OpenDatabase(conf.RequestLogsDBFilepath); err != nil {
-				log.Printf("failed to open request logs db: %s", err)
+				log.Printf("failed to open request logs db: %s", redact(conf, err))
 			}
 		}
 
@@ -253,12 +277,31 @@ func runBot(conf config) {
 					_, _ = sendMessage(b, conf, msgTypeNotSupported, message.Chat.ID, &message.MessageID)
 				}
 			} else {
-				log.Printf("failed to poll updates: %s", err)
+				log.Printf("failed to poll updates: %s", redact(conf, err))
 			}
 		})
 	} else {
 		log.Printf("failed to get bot info: %s", *b.Description)
 	}
+}
+
+// redact given error for logging and/or messaing
+func redact(conf config, err error) (redacted string) {
+	redacted = err.Error()
+
+	if strings.Index(redacted, *conf.GoogleAIAPIKey) != -1 {
+		redacted = strings.ReplaceAll(redacted, *conf.GoogleAIAPIKey, redactedString)
+	}
+	if strings.Index(redacted, *conf.TelegramBotToken) != -1 {
+		redacted = strings.ReplaceAll(redacted, *conf.TelegramBotToken, redactedString)
+	}
+
+	return redacted
+}
+
+// redact given googleapi error for logging and/or messaing
+func gerror(conf config, gerr *googleapi.Error) string {
+	return redact(conf, fmt.Errorf("googleapi error: %s", gerr.Body))
 }
 
 // checks if given update is allowed or not
@@ -283,27 +326,39 @@ func handleMessage(ctx context.Context, bot *tg.Bot, client *genai.Client, conf 
 	userID := message.From.ID
 	messageID := message.MessageID
 
+	var errMessage string
 	if msg := usableMessageFromUpdate(update); msg != nil {
-		parent, original := chatMessagesFromTGMessage(bot, *msg)
-		if original != nil {
-			ctx, cancel := context.WithTimeout(ctx, time.Duration(conf.AnswerTimeoutSeconds)*time.Second)
-			defer cancel()
+		if parent, original, err := chatMessagesFromTGMessage(bot, *msg); err == nil {
+			if original != nil {
+				ctx, cancel := context.WithTimeout(ctx, time.Duration(conf.AnswerTimeoutSeconds)*time.Second)
+				defer cancel()
 
-			answer(ctx, bot, client, conf, db, parent, original, chatID, userID, userNameFromUpdate(update), messageID)
+				answer(ctx, bot, client, conf, db, parent, original, chatID, userID, userNameFromUpdate(update), messageID)
 
-			if err := ctx.Err(); err != nil {
-				_, _ = sendMessage(bot, conf, fmt.Sprintf("Failed to generate an answer from Gemini in %d seconds: %s", conf.AnswerTimeoutSeconds, err), chatID, &messageID)
+				if err := ctx.Err(); err == nil {
+					return
+				}
+
+				errMessage = fmt.Sprintf("Failed to answer in %d seconds: %s", conf.AnswerTimeoutSeconds, redact(conf, err))
+
+				log.Printf(errMessage)
+			} else {
+				log.Printf("no converted chat messages from update: %+v", update)
+
+				errMessage = fmt.Sprintf("There was no usable chat messages from telegram message.")
 			}
-
-			return
 		} else {
-			log.Printf("no converted chat messages from update: %+v", update)
+			log.Printf("failed to get chat messages from telegram message: %s", err)
+
+			errMessage = fmt.Sprintf("Failed to get chat messages from telegram message: %s", redact(conf, err))
 		}
 	} else {
 		log.Printf("no usable message from update: %+v", update)
+
+		errMessage = fmt.Sprintf("There was no usable message from update.")
 	}
 
-	_, _ = sendMessage(bot, conf, "Failed to get usable chat messages from your input. See the server logs for more information.", chatID, &messageID)
+	_, _ = sendMessage(bot, conf, errMessage, chatID, &messageID)
 }
 
 // get usable message from given update
@@ -332,22 +387,27 @@ func usableMessageFromUpdate(update tg.Update) (message *tg.Message) {
 }
 
 // convert telegram bot message into chat messages
-func chatMessagesFromTGMessage(bot *tg.Bot, message tg.Message) (parent, original *chatMessage) {
+func chatMessagesFromTGMessage(bot *tg.Bot, message tg.Message) (parent, original *chatMessage, err error) {
 	replyTo := repliedToMessage(message)
+	errs := []error{}
 
 	// chat message 1 (parent message)
 	if replyTo != nil {
-		if chatMessage := convertMessage(bot, *replyTo); chatMessage != nil {
+		if chatMessage, err := convertMessage(bot, *replyTo); err == nil {
 			parent = chatMessage
+		} else {
+			errs = append(errs, err)
 		}
 	}
 
 	// chat message 2 (original message)
-	if chatMessage := convertMessage(bot, message); chatMessage != nil {
+	if chatMessage, err := convertMessage(bot, message); err == nil {
 		original = chatMessage
+	} else {
+		errs = append(errs, err)
 	}
 
-	return parent, original
+	return parent, original, errors.Join(errs...)
 }
 
 // send given text to the chat
@@ -416,44 +476,14 @@ func sendFile(bot *tg.Bot, conf config, data []byte, chatID int64, messageID *in
 	return sentMessageID, err
 }
 
-/*
-// count tokens
-func countTokens(ctx context.Context, model *genai.GenerativeModel, parts ...genai.Part) (count int32, err error) {
-	if len(parts) == 0 {
-		return 0, fmt.Errorf("cannot count tokens of an empty parts array")
-	}
-
-	var counted *genai.CountTokensResponse
-	if counted, err = model.CountTokens(ctx, parts...); err == nil {
-		count = counted.TotalTokens
-	}
-	return count, err
-}
-*/
-
 // generate an answer to given message and send it to the chat
 func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config, db *Database, parent, original *chatMessage, chatID, userID int64, username string, messageID int64) {
 	// leave a reaction on the original message for confirmation
 	_ = bot.SetMessageReaction(chatID, messageID, tg.NewMessageReactionWithEmoji("👌"))
 
-	multimodal := false
+	multimodal := (original != nil && len(original.files) > 0) || (parent != nil && len(parent.files) > 0)
 
-	// prompt
-	prompt := []genai.Part{}
-	if original != nil {
-		// text
-		prompt = append(prompt, genai.Text(original.text))
-
-		// files
-		for _, file := range original.files {
-			prompt = append(prompt, genai.Blob{
-				MIMEType: http.DetectContentType(file),
-				Data:     file,
-			})
-			multimodal = true
-		}
-	}
-
+	// model
 	var model *genai.GenerativeModel
 	if multimodal {
 		model = client.GenerativeModel(*conf.GoogleMultimodalModel)
@@ -471,8 +501,43 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 		}
 	}
 
+	// prompt
+	prompt := []genai.Part{}
+	fileNames := []string{}
+	if original != nil {
+		// text
+		prompt = append(prompt, genai.Text(original.text))
+
+		// files
+		for _, file := range original.files {
+			mimeType := http.DetectContentType(file)
+
+			if strings.HasPrefix(mimeType, "image/") {
+				prompt = append(prompt, genai.Blob{
+					MIMEType: mimeType,
+					Data:     file,
+				})
+			} else {
+				if file, err := client.UploadFile(ctx, "", bytes.NewReader(file), &genai.UploadFileOptions{}); err == nil {
+					prompt = append(prompt, genai.FileData{
+						MIMEType: file.MIMEType,
+						URI:      file.URI,
+					})
+
+					fileNames = append(fileNames, file.Name) // FIXME: will wait for it to become active
+				} else {
+					log.Printf("failed to upload file(%s) for prompt: %s", mimeType, redact(conf, err))
+				}
+			}
+		}
+	}
+
+	// wait for all prompt files to become active
+	waitForFiles(ctx, conf, client, fileNames)
+
 	// set history
 	session := model.StartChat()
+	fileNames = []string{}
 	if parent != nil {
 		session.History = []*genai.Content{}
 
@@ -483,10 +548,25 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 
 		// files
 		for _, file := range parent.files {
-			parts = append(parts, genai.Blob{
-				MIMEType: http.DetectContentType(file),
-				Data:     file,
-			})
+			mimeType := http.DetectContentType(file)
+
+			if strings.HasPrefix(mimeType, "image/") {
+				parts = append(parts, genai.Blob{
+					MIMEType: mimeType,
+					Data:     file,
+				})
+			} else {
+				if file, err := client.UploadFile(ctx, "", bytes.NewReader(file), &genai.UploadFileOptions{}); err == nil {
+					parts = append(parts, genai.FileData{
+						MIMEType: file.MIMEType,
+						URI:      file.URI,
+					})
+
+					fileNames = append(fileNames, file.Name) // FIXME: will wait for it to become active
+				} else {
+					log.Printf("failed to upload file(%s) for history: %s", mimeType, redact(conf, err))
+				}
+			}
 		}
 
 		session.History = append(session.History, &genai.Content{
@@ -494,6 +574,9 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 			Parts: parts,
 		})
 	}
+
+	// wait for all prompt files to become active
+	waitForFiles(ctx, conf, client, fileNames)
 
 	// set safety filters
 	model.SafetySettings = safetySettings(genai.HarmBlockThreshold(*conf.GoogleAIHarmBlockThreshold))
@@ -544,12 +627,12 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 							if sentMessageID, err := sendMessage(bot, conf, generatedText, chatID, &messageID); err == nil {
 								firstMessageID = &sentMessageID
 							} else {
-								log.Printf("failed to send stream messages [%+v + %+v] with '%+v': %s", parent, original, parts, err)
+								log.Printf("failed to send stream messages [%+v + %+v] with '%+v': %s", parent, original, parts, redact(conf, err))
 							}
 						} else { // update the first message
 							// update the first message (append text)
 							if err := updateMessage(bot, conf, mergedText, chatID, *firstMessageID); err != nil {
-								log.Printf("failed to update stream messages [%+v + %+v] with '%+v': %s", parent, original, parts, err)
+								log.Printf("failed to update stream messages [%+v + %+v] with '%+v': %s", parent, original, parts, redact(conf, err))
 							}
 						}
 					} else {
@@ -558,7 +641,14 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 				}
 			} else {
 				if err != iterator.Done {
-					log.Printf("failed to iterate stream: %s", err)
+					var error string
+					var gerr *googleapi.Error
+					if errors.As(err, &gerr) {
+						error = gerror(conf, gerr)
+					} else {
+						error = redact(conf, err)
+					}
+					log.Printf("failed to iterate stream: %s", error)
 				}
 				break
 			}
@@ -620,7 +710,7 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 							// save to database (successful)
 							savePromptAndResult(db, chatID, userID, username, messagesToPrompt(parent, original), uint(numTokensInput), generatedText, uint(numTokensOutput), true)
 						} else {
-							log.Printf("failed to answer messages [%+v + %+v] with '%s' as file: %s", parent, original, parts, err)
+							log.Printf("failed to answer messages [%+v + %+v] with '%s' as file: %s", parent, original, parts, redact(conf, err))
 
 							_, _ = sendMessage(bot, conf, "Failed to send you the answer as a text file. See the server logs for more information.", chatID, &messageID)
 
@@ -635,7 +725,7 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 							// save to database (successful)
 							savePromptAndResult(db, chatID, userID, username, messagesToPrompt(parent, original), uint(numTokensInput), generatedText, uint(numTokensOutput), true)
 						} else {
-							log.Printf("failed to answer messages [%+v + %+v] with '%+v': %s", parent, original, parts, err)
+							log.Printf("failed to answer messages [%+v + %+v] with '%+v': %s", parent, original, parts, redact(conf, err))
 
 							_, _ = sendMessage(bot, conf, "Failed to send you the answer as a text. See the server logs for more information.", chatID, &messageID)
 
@@ -654,7 +744,7 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 						// save to database (successful)
 						savePromptAndResult(db, chatID, userID, username, messagesToPrompt(parent, original), uint(numTokensInput), generatedText, uint(numTokensOutput), true)
 					} else {
-						log.Printf("failed to answer messages [%+v + %+v] with '%s' as file: %s", parent, original, parts, err)
+						log.Printf("failed to answer messages [%+v + %+v] with '%s' as file: %s", parent, original, parts, redact(conf, err))
 
 						_, _ = sendMessage(bot, conf, "Failed to send you the answer as a text file. See the server logs for more information.", chatID, &messageID)
 
@@ -666,13 +756,51 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 				}
 			}
 		} else {
-			log.Printf("failed to create chat completion: %s", err)
+			var error string
+			var gerr *googleapi.Error
+			if errors.As(err, &gerr) {
+				error = gerror(conf, gerr)
+			} else {
+				error = redact(conf, err)
+			}
 
-			_, _ = sendMessage(bot, conf, fmt.Sprintf("Failed to generate an answer from Gemini: %s", err), chatID, &messageID)
+			log.Printf("failed to create chat completion: %s", error)
+
+			_, _ = sendMessage(bot, conf, fmt.Sprintf("Failed to generate an answer from Gemini: %s", error), chatID, &messageID)
 
 			// save to database (error)
-			savePromptAndResult(db, chatID, userID, username, messagesToPrompt(parent, original), 0, err.Error(), 0, false)
+			savePromptAndResult(db, chatID, userID, username, messagesToPrompt(parent, original), 0, error, 0, false)
 		}
+	}
+}
+
+// wait for all files to be active
+func waitForFiles(ctx context.Context, conf config, client *genai.Client, fileNames []string) {
+	if conf.Verbose {
+		log.Printf("[verbose] will wait for %d file(s) to become active", len(fileNames))
+	}
+
+	var wg sync.WaitGroup
+	for _, fileName := range fileNames {
+		wg.Add(1)
+
+		go func(name string) {
+			for {
+				if file, err := client.GetFile(ctx, name); err == nil {
+					if file.State == genai.FileStateActive {
+						wg.Done()
+						break
+					} else {
+						time.Sleep(uploadedFileStateCheckIntervalMilliseconds * time.Millisecond)
+					}
+				}
+			}
+		}(fileName)
+	}
+	wg.Wait()
+
+	if conf.Verbose {
+		log.Printf("[verbose] %d file(s) now active", len(fileNames))
 	}
 }
 
@@ -737,7 +865,7 @@ func repliedToMessage(message tg.Message) *tg.Message {
 // return nil if there was any error.
 //
 // (if it was sent from bot, make it an assistant's message)
-func convertMessage(bot *tg.Bot, message tg.Message) *chatMessage {
+func convertMessage(bot *tg.Bot, message tg.Message) (cm *chatMessage, err error) {
 	var role chatMessageRole
 	if message.IsBot() {
 		role = chatMessageRoleModel
@@ -754,24 +882,28 @@ func convertMessage(bot *tg.Bot, message tg.Message) *chatMessage {
 		}
 
 		photos := [][]byte{}
+		var bytes []byte
 		for _, photo := range message.Photo {
-			if bytes, err := readMedia(bot, "photo", photo.FileID); err == nil {
+			if bytes, err = readMedia(bot, "photo", photo.FileID); err == nil {
 				photos = append(photos, bytes)
 			} else {
-				log.Printf("failed to read photo content for %s message: %s", role, err)
+				err = fmt.Errorf("failed to read photo content for %s message: %s", role, err)
+				break
 			}
 		}
 
-		return &chatMessage{
-			role:  role,
-			text:  text,
-			files: photos,
+		if err == nil {
+			return &chatMessage{
+				role:  role,
+				text:  text,
+				files: photos,
+			}, nil
 		}
 	} else if message.HasText() {
 		return &chatMessage{
 			role: role,
 			text: *message.Text,
-		}
+		}, nil
 	} else if message.HasVideo() {
 		var text string
 		if message.HasCaption() {
@@ -780,14 +912,15 @@ func convertMessage(bot *tg.Bot, message tg.Message) *chatMessage {
 			text = defaultPromptForMedias
 		}
 
-		if bytes, err := readMedia(bot, "video", message.Video.FileID); err == nil {
+		var bytes []byte
+		if bytes, err = readMedia(bot, "video", message.Video.FileID); err == nil {
 			return &chatMessage{
 				role:  role,
 				text:  text,
 				files: [][]byte{bytes},
-			}
+			}, nil
 		} else {
-			log.Printf("failed to read video content for %s message: %s", role, err)
+			err = fmt.Errorf("failed to read video content for %s message: %s", role, err)
 		}
 	} else if message.HasVideoNote() {
 		var text string
@@ -797,14 +930,15 @@ func convertMessage(bot *tg.Bot, message tg.Message) *chatMessage {
 			text = defaultPromptForMedias
 		}
 
-		if bytes, err := readMedia(bot, "video note", message.VideoNote.FileID); err == nil {
+		var bytes []byte
+		if bytes, err = readMedia(bot, "video note", message.VideoNote.FileID); err == nil {
 			return &chatMessage{
 				role:  role,
 				text:  text,
 				files: [][]byte{bytes},
-			}
+			}, nil
 		} else {
-			log.Printf("failed to read video note content for %s message: %s", role, err)
+			err = fmt.Errorf("failed to read video note content for %s message: %s", role, err)
 		}
 	} else if message.HasAudio() {
 		var text string
@@ -814,14 +948,15 @@ func convertMessage(bot *tg.Bot, message tg.Message) *chatMessage {
 			text = defaultPromptForMedias
 		}
 
-		if bytes, err := readMedia(bot, "audio", message.Audio.FileID); err == nil {
+		var bytes []byte
+		if bytes, err = readMedia(bot, "audio", message.Audio.FileID); err == nil {
 			return &chatMessage{
 				role:  role,
 				text:  text,
 				files: [][]byte{bytes},
-			}
+			}, nil
 		} else {
-			log.Printf("failed to read audio content for %s message: %s", role, err)
+			err = fmt.Errorf("failed to read audio content for %s message: %s", role, err)
 		}
 	} else if message.HasVoice() {
 		var text string
@@ -831,14 +966,15 @@ func convertMessage(bot *tg.Bot, message tg.Message) *chatMessage {
 			text = defaultPromptForMedias
 		}
 
-		if bytes, err := readMedia(bot, "voice", message.Voice.FileID); err == nil {
+		var bytes []byte
+		if bytes, err = readMedia(bot, "voice", message.Voice.FileID); err == nil {
 			return &chatMessage{
 				role:  role,
 				text:  text,
 				files: [][]byte{bytes},
-			}
+			}, nil
 		} else {
-			log.Printf("failed to read voice content for %s message: %s", role, err)
+			err = fmt.Errorf("failed to read voice content for %s message: %s", role, err)
 		}
 	} else if message.HasDocument() {
 		var text string
@@ -848,18 +984,19 @@ func convertMessage(bot *tg.Bot, message tg.Message) *chatMessage {
 			text = defaultPromptForMedias
 		}
 
-		if bytes, err := readMedia(bot, "document", message.Document.FileID); err == nil {
+		var bytes []byte
+		if bytes, err = readMedia(bot, "document", message.Document.FileID); err == nil {
 			return &chatMessage{
 				role:  role,
 				text:  text,
 				files: [][]byte{bytes},
-			}
+			}, nil
 		} else {
-			log.Printf("failed to read document content for %s message: %s", role, err)
+			err = fmt.Errorf("failed to read document content for %s message: %s", role, err)
 		}
 	}
 
-	return nil
+	return nil, err
 }
 
 // read bytes from given media
