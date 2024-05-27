@@ -501,9 +501,10 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 		}
 	}
 
+	fileNames := []string{}
+
 	// prompt
 	prompt := []genai.Part{}
-	fileNames := []string{}
 	if original != nil {
 		// text
 		prompt = append(prompt, genai.Text(original.text))
@@ -512,7 +513,7 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 		for _, file := range original.files {
 			mimeType := http.DetectContentType(file)
 
-			if strings.HasPrefix(mimeType, "image/") {
+			if strings.HasPrefix(mimeType, "image/") { // FIXME: images are working without upload for now
 				prompt = append(prompt, genai.Blob{
 					MIMEType: mimeType,
 					Data:     file,
@@ -534,12 +535,8 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 		}
 	}
 
-	// wait for all prompt files to become active
-	waitForFiles(ctx, conf, client, fileNames)
-
 	// set history
 	session := model.StartChat()
-	fileNames = []string{}
 	if parent != nil {
 		session.History = []*genai.Content{}
 
@@ -552,7 +549,7 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 		for _, file := range parent.files {
 			mimeType := http.DetectContentType(file)
 
-			if strings.HasPrefix(mimeType, "image/") {
+			if strings.HasPrefix(mimeType, "image/") { // FIXME: images are working without upload for now
 				parts = append(parts, genai.Blob{
 					MIMEType: mimeType,
 					Data:     file,
@@ -579,7 +576,7 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 		})
 	}
 
-	// wait for all prompt files to become active
+	// FIXME: wait for all prompt files to become active
 	waitForFiles(ctx, conf, client, fileNames)
 
 	// set safety filters
