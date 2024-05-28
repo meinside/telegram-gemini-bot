@@ -254,7 +254,17 @@ func runBot(conf config) {
 				return
 			}
 
-			handleMessage(ctx, b, client, conf, db, update, message)
+			handleMessages(ctx, b, client, conf, db, []tg.Update{update}, nil)
+		})
+		bot.SetMediaGroupHandler(func(b *tg.Bot, updates []tg.Update, mediaGroupID string) {
+			for _, update := range updates {
+				if !isAllowed(update, allowedUsers) {
+					log.Printf("message (media group id: %s) not allowed: %s", mediaGroupID, userNameFromUpdate(update))
+					return
+				}
+			}
+
+			handleMessages(ctx, b, client, conf, db, updates, &mediaGroupID)
 		})
 
 		// set command handlers
@@ -320,28 +330,55 @@ func isAllowed(update tg.Update, allowedUsers map[string]bool) bool {
 	return false
 }
 
-// handle allowed message update from telegram bot api
-func handleMessage(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config, db *Database, update tg.Update, message tg.Message) {
+// handle allowed message updates from telegram bot api
+func handleMessages(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config, db *Database, updates []tg.Update, mediaGroupID *string) {
+	if len(updates) <= 0 {
+		if mediaGroupID == nil {
+			log.Printf("failed to handle messages: no updates given")
+		} else {
+			log.Printf("failed to handle messages (media group id: '%s'): no updates given", *mediaGroupID)
+		}
+		return
+	}
+
+	update := updates[0]
+
+	// first message + other grouped messages
+	var message *tg.Message
+	if update.HasMessage() {
+		message = update.Message
+	} else if update.HasEditedMessage() {
+		message = update.EditedMessage
+	}
+	var otherGroupedMessages []tg.Message
+	for _, update := range updates[1:] {
+		if update.HasMessage() {
+			otherGroupedMessages = append(otherGroupedMessages, *update.Message)
+		} else if update.HasEditedMessage() {
+			otherGroupedMessages = append(otherGroupedMessages, *update.EditedMessage)
+		}
+	}
+
 	chatID := message.Chat.ID
 	userID := message.From.ID
 	messageID := message.MessageID
 
 	var errMessage string
 	if msg := usableMessageFromUpdate(update); msg != nil {
-		if parent, original, err := chatMessagesFromTGMessage(bot, *msg); err == nil {
+		if parent, original, err := chatMessagesFromTGMessage(bot, *msg, otherGroupedMessages...); err == nil {
 			if original != nil {
 				ctx, cancel := context.WithTimeout(ctx, time.Duration(conf.AnswerTimeoutSeconds)*time.Second)
 				defer cancel()
 
 				answer(ctx, bot, client, conf, db, parent, original, chatID, userID, userNameFromUpdate(update), messageID)
 
-				if err := ctx.Err(); err == nil {
+				if err = ctx.Err(); err == nil {
 					return
 				}
 
-				errMessage = fmt.Sprintf("Failed to answer in %d seconds: %s", conf.AnswerTimeoutSeconds, redact(conf, err))
+				log.Printf("failed to answer in %d seconds: %s", conf.AnswerTimeoutSeconds, redact(conf, err))
 
-				log.Printf(errMessage)
+				errMessage = fmt.Sprintf("Failed to answer in %d seconds: %s", conf.AnswerTimeoutSeconds, redact(conf, err))
 			} else {
 				log.Printf("no converted chat messages from update: %+v", update)
 
@@ -387,7 +424,7 @@ func usableMessageFromUpdate(update tg.Update) (message *tg.Message) {
 }
 
 // convert telegram bot message into chat messages
-func chatMessagesFromTGMessage(bot *tg.Bot, message tg.Message) (parent, original *chatMessage, err error) {
+func chatMessagesFromTGMessage(bot *tg.Bot, message tg.Message, otherGroupedMessages ...tg.Message) (parent, original *chatMessage, err error) {
 	replyTo := repliedToMessage(message)
 	errs := []error{}
 
@@ -401,7 +438,7 @@ func chatMessagesFromTGMessage(bot *tg.Bot, message tg.Message) (parent, origina
 	}
 
 	// chat message 2 (original message)
-	if chatMessage, err := convertMessage(bot, message); err == nil {
+	if chatMessage, err := convertMessage(bot, message, otherGroupedMessages...); err == nil {
 		original = chatMessage
 	} else {
 		errs = append(errs, err)
@@ -863,10 +900,8 @@ func repliedToMessage(message tg.Message) *tg.Message {
 
 // convert given telegram bot message to an genai chat message,
 //
-// return nil if there was any error.
-//
 // (if it was sent from bot, make it an assistant's message)
-func convertMessage(bot *tg.Bot, message tg.Message) (cm *chatMessage, err error) {
+func convertMessage(bot *tg.Bot, message tg.Message, otherGroupedMessages ...tg.Message) (cm *chatMessage, err error) {
 	var role chatMessageRole
 	if message.IsBot() {
 		role = chatMessageRoleModel
@@ -874,7 +909,12 @@ func convertMessage(bot *tg.Bot, message tg.Message) (cm *chatMessage, err error
 		role = chatMessageRoleUser
 	}
 
-	if message.HasPhoto() {
+	if message.HasText() {
+		return &chatMessage{
+			role: role,
+			text: *message.Text,
+		}, nil
+	} else if message.HasPhoto() || message.HasVideo() || message.HasVideoNote() || message.HasAudio() || message.HasVoice() || message.HasDocument() {
 		var text string
 		if message.HasCaption() {
 			text = *message.Caption
@@ -882,118 +922,76 @@ func convertMessage(bot *tg.Bot, message tg.Message) (cm *chatMessage, err error
 			text = defaultPromptForMedias
 		}
 
-		photos := [][]byte{}
-		var bytes []byte
+		allMessages := append([]tg.Message{message}, otherGroupedMessages...)
+
+		allFiles := [][]byte{}
+		for _, msg := range allMessages {
+			if files, err := filesFromMessage(bot, msg); err == nil {
+				allFiles = append(allFiles, files...)
+			} else {
+				return nil, err
+			}
+		}
+
+		return &chatMessage{
+			role:  role,
+			text:  text,
+			files: allFiles,
+		}, nil
+	} else {
+		err = fmt.Errorf("failed to convert message: not a supported type")
+	}
+
+	return nil, err
+}
+
+// extract file bytes from given message
+func filesFromMessage(bot *tg.Bot, message tg.Message) (files [][]byte, err error) {
+	var bytes []byte
+	if message.HasPhoto() {
+		files = [][]byte{}
+
 		for _, photo := range message.Photo {
 			if bytes, err = readMedia(bot, "photo", photo.FileID); err == nil {
-				photos = append(photos, bytes)
+				files = append(files, bytes)
 			} else {
-				err = fmt.Errorf("failed to read photo content for %s message: %s", role, err)
+				err = fmt.Errorf("failed to read photo content: %s", err)
 				break
 			}
 		}
 
 		if err == nil {
-			return &chatMessage{
-				role:  role,
-				text:  text,
-				files: photos,
-			}, nil
+			return files, nil
 		}
-	} else if message.HasText() {
-		return &chatMessage{
-			role: role,
-			text: *message.Text,
-		}, nil
 	} else if message.HasVideo() {
-		var text string
-		if message.HasCaption() {
-			text = *message.Caption
-		} else {
-			text = defaultPromptForMedias
-		}
-
-		var bytes []byte
 		if bytes, err = readMedia(bot, "video", message.Video.FileID); err == nil {
-			return &chatMessage{
-				role:  role,
-				text:  text,
-				files: [][]byte{bytes},
-			}, nil
+			return [][]byte{bytes}, nil
 		} else {
-			err = fmt.Errorf("failed to read video content for %s message: %s", role, err)
+			err = fmt.Errorf("failed to read video content: %s", err)
 		}
 	} else if message.HasVideoNote() {
-		var text string
-		if message.HasCaption() {
-			text = *message.Caption
-		} else {
-			text = defaultPromptForMedias
-		}
-
-		var bytes []byte
 		if bytes, err = readMedia(bot, "video note", message.VideoNote.FileID); err == nil {
-			return &chatMessage{
-				role:  role,
-				text:  text,
-				files: [][]byte{bytes},
-			}, nil
+			return [][]byte{bytes}, nil
 		} else {
-			err = fmt.Errorf("failed to read video note content for %s message: %s", role, err)
+			err = fmt.Errorf("failed to read video note content: %s", err)
 		}
 	} else if message.HasAudio() {
-		var text string
-		if message.HasCaption() {
-			text = *message.Caption
-		} else {
-			text = defaultPromptForMedias
-		}
-
-		var bytes []byte
 		if bytes, err = readMedia(bot, "audio", message.Audio.FileID); err == nil {
-			return &chatMessage{
-				role:  role,
-				text:  text,
-				files: [][]byte{bytes},
-			}, nil
+			return [][]byte{bytes}, nil
 		} else {
-			err = fmt.Errorf("failed to read audio content for %s message: %s", role, err)
+			err = fmt.Errorf("failed to read audio content: %s", err)
 		}
 	} else if message.HasVoice() {
-		var text string
-		if message.HasCaption() {
-			text = *message.Caption
-		} else {
-			text = defaultPromptForMedias
-		}
-
-		var bytes []byte
 		if bytes, err = readMedia(bot, "voice", message.Voice.FileID); err == nil {
-			return &chatMessage{
-				role:  role,
-				text:  text,
-				files: [][]byte{bytes},
-			}, nil
+			return [][]byte{bytes}, nil
 		} else {
-			err = fmt.Errorf("failed to read voice content for %s message: %s", role, err)
+			err = fmt.Errorf("failed to read voice content: %s", err)
 		}
 	} else if message.HasDocument() {
-		var text string
-		if message.HasCaption() {
-			text = *message.Caption
-		} else {
-			text = defaultPromptForMedias
-		}
-
-		var bytes []byte
 		if bytes, err = readMedia(bot, "document", message.Document.FileID); err == nil {
-			return &chatMessage{
-				role:  role,
-				text:  text,
-				files: [][]byte{bytes},
-			}, nil
+			return [][]byte{bytes}, nil
 		} else {
-			err = fmt.Errorf("failed to read document content for %s message: %s", role, err)
+			err = fmt.Errorf("failed to read document content: %s", err)
 		}
 	}
 
