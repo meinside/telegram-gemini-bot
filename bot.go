@@ -623,7 +623,7 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 	var numTokensInput int32 = 0
 	var numTokensOutput int32 = 0
 
-	if conf.StreamMessages {
+	if conf.StreamMessages { // stream message
 		iter := session.SendMessageStream(ctx, prompt...)
 
 		if conf.Verbose {
@@ -703,7 +703,7 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 			return false
 		})()
 		savePromptAndResult(db, chatID, userID, username, messagesToPrompt(parent, original), uint(numTokensInput), mergedText, uint(numTokensOutput), successful)
-	} else {
+	} else { // send message synchronously
 		if generated, err := session.SendMessage(ctx, prompt...); err == nil {
 			if conf.Verbose {
 				log.Printf("[verbose] [%+v + %+v] ===> %+v", parent, original, generated)
