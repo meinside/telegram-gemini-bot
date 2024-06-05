@@ -3,8 +3,12 @@
 package main
 
 import (
+	"fmt"
 	"log"
+	"strings"
 
+	"golang.org/x/text/language"
+	"golang.org/x/text/message"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -39,8 +43,8 @@ type Database struct {
 	db *gorm.DB
 }
 
-// OpenDatabase opens and returns a database at given path: `dbPath`.
-func OpenDatabase(dbPath string) (database *Database, err error) {
+// open and return a database at given path: `dbPath`.
+func openDatabase(dbPath string) (database *Database, err error) {
 	var db *gorm.DB
 	db, err = gorm.Open(sqlite.Open(dbPath), &gorm.Config{
 		PrepareStmt: true,
@@ -61,8 +65,70 @@ func OpenDatabase(dbPath string) (database *Database, err error) {
 	return nil, err
 }
 
-// SavePrompt saves `prompt`.
-func (d *Database) SavePrompt(prompt Prompt) (err error) {
+// save `prompt`.
+func (d *Database) savePrompt(prompt Prompt) (err error) {
 	tx := d.db.Save(&prompt)
 	return tx.Error
+}
+
+// save `prompt` and its result to logs database
+func savePromptAndResult(db *Database, chatID, userID int64, username string, prompt string, promptTokens uint, result string, resultTokens uint, resultSuccessful bool) {
+	if db != nil {
+		if err := db.savePrompt(Prompt{
+			ChatID:   chatID,
+			UserID:   userID,
+			Username: username,
+			Text:     prompt,
+			Tokens:   promptTokens,
+			Result: Generated{
+				Successful: resultSuccessful,
+				Text:       result,
+				Tokens:     resultTokens,
+			},
+		}); err != nil {
+			log.Printf("failed to save prompt & result to database: %s", err)
+		}
+	}
+}
+
+// retrieve stats from database
+func retrieveStats(db *Database) string {
+	if db == nil {
+		return msgDatabaseNotConfigured
+	} else {
+		lines := []string{}
+
+		var prompt Prompt
+		if tx := db.db.First(&prompt); tx.Error == nil {
+			lines = append(lines, fmt.Sprintf("Since %s", prompt.CreatedAt.Format("2006-01-02 15:04:05")))
+			lines = append(lines, "")
+		}
+
+		printer := message.NewPrinter(language.English) // for adding commas to numbers
+
+		var count int64
+		if tx := db.db.Table("prompts").Select("count(distinct chat_id) as count").Scan(&count); tx.Error == nil {
+			lines = append(lines, fmt.Sprintf("Chats: %s", printer.Sprintf("%d", count)))
+		}
+
+		var sumAndCount struct {
+			Sum   int64
+			Count int64
+		}
+		if tx := db.db.Table("prompts").Select("sum(tokens) as sum, count(id) as count").Where("tokens > 0").Scan(&sumAndCount); tx.Error == nil {
+			lines = append(lines, fmt.Sprintf("Prompts: %s (Total tokens: %s)", printer.Sprintf("%d", sumAndCount.Count), printer.Sprintf("%d", sumAndCount.Sum)))
+		}
+		if tx := db.db.Table("generateds").Select("sum(tokens) as sum, count(id) as count").Where("successful = 1").Scan(&sumAndCount); tx.Error == nil {
+			lines = append(lines, fmt.Sprintf("Completions: %s (Total tokens: %s)", printer.Sprintf("%d", sumAndCount.Count), printer.Sprintf("%d", sumAndCount.Sum)))
+		}
+		if tx := db.db.Table("generateds").Select("count(id) as count").Where("successful = 0").Scan(&count); tx.Error == nil {
+			lines = append(lines, fmt.Sprintf("Errors: %s", printer.Sprintf("%d", count)))
+		}
+
+		if len(lines) > 0 {
+			return strings.Join(lines, "\n")
+		}
+
+		return msgDatabaseEmpty
+	}
 }

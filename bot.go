@@ -8,23 +8,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/meinside/infisical-go"
 	"github.com/meinside/infisical-go/helper"
 	tg "github.com/meinside/telegram-bot-go"
-	"github.com/meinside/version-go"
 
 	"github.com/google/generative-ai-go/genai"
 	"github.com/tailscale/hujson"
-	"golang.org/x/text/language"
-	"golang.org/x/text/message"
 	"google.golang.org/api/googleapi"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
@@ -35,8 +30,6 @@ const (
 	defaultGenerationModel      = "gemini-pro"
 	defaultMultimodalModel      = "gemini-pro-vision"
 	defaultAIHarmBlockThreshold = 3
-
-	defaultPromptForMedias = "Describe provided media(s)."
 
 	defaultSystemInstruction = "You are a Telegram bot with a backend system which uses the Google Gemini API. Respond to the user's message as precisely as possible. Your response must be in plain text."
 )
@@ -63,12 +56,6 @@ const (
 `
 
 	defaultAnswerTimeoutSeconds = 180 // 3 minutes
-
-	readURLContentTimeoutSeconds = 60 // 1 minute
-
-	uploadedFileStateCheckIntervalMilliseconds = 300
-
-	redactedString = "<REDACTED>"
 )
 
 type chatMessageRole string
@@ -242,7 +229,7 @@ func runBot(conf config) {
 		var db *Database = nil
 		if conf.RequestLogsDBFilepath != "" {
 			var err error
-			if db, err = OpenDatabase(conf.RequestLogsDBFilepath); err != nil {
+			if db, err = openDatabase(conf.RequestLogsDBFilepath); err != nil {
 				log.Printf("failed to open request logs db: %s", redact(conf, err))
 			}
 		}
@@ -293,41 +280,6 @@ func runBot(conf config) {
 	} else {
 		log.Printf("failed to get bot info: %s", *b.Description)
 	}
-}
-
-// redact given error for logging and/or messaing
-func redact(conf config, err error) (redacted string) {
-	redacted = err.Error()
-
-	if strings.Index(redacted, *conf.GoogleAIAPIKey) != -1 {
-		redacted = strings.ReplaceAll(redacted, *conf.GoogleAIAPIKey, redactedString)
-	}
-	if strings.Index(redacted, *conf.TelegramBotToken) != -1 {
-		redacted = strings.ReplaceAll(redacted, *conf.TelegramBotToken, redactedString)
-	}
-
-	return redacted
-}
-
-// redact given googleapi error for logging and/or messaing
-func gerror(conf config, gerr *googleapi.Error) string {
-	return redact(conf, fmt.Errorf("googleapi error: %s", gerr.Body))
-}
-
-// checks if given update is allowed or not
-func isAllowed(update tg.Update, allowedUsers map[string]bool) bool {
-	var username string
-	if update.HasMessage() && update.Message.From.Username != nil {
-		username = *update.Message.From.Username
-	} else if update.HasEditedMessage() && update.EditedMessage.From.Username != nil {
-		username = *update.EditedMessage.From.Username
-	}
-
-	if _, exists := allowedUsers[username]; exists {
-		return true
-	}
-
-	return false
 }
 
 // handle allowed message updates from telegram bot api
@@ -382,7 +334,7 @@ func handleMessages(ctx context.Context, bot *tg.Bot, client *genai.Client, conf
 			} else {
 				log.Printf("no converted chat messages from update: %+v", update)
 
-				errMessage = fmt.Sprintf("There was no usable chat messages from telegram message.")
+				errMessage = "There was no usable chat messages from telegram message."
 			}
 		} else {
 			log.Printf("failed to get chat messages from telegram message: %s", err)
@@ -392,59 +344,10 @@ func handleMessages(ctx context.Context, bot *tg.Bot, client *genai.Client, conf
 	} else {
 		log.Printf("no usable message from update: %+v", update)
 
-		errMessage = fmt.Sprintf("There was no usable message from update.")
+		errMessage = "There was no usable message from update."
 	}
 
 	_, _ = sendMessage(bot, conf, errMessage, chatID, &messageID)
-}
-
-// get usable message from given update
-func usableMessageFromUpdate(update tg.Update) (message *tg.Message) {
-	if update.HasMessage() &&
-		(update.Message.HasText() ||
-			update.Message.HasPhoto() ||
-			update.Message.HasVideo() ||
-			update.Message.HasVideoNote() ||
-			update.Message.HasAudio() ||
-			update.Message.HasVoice() ||
-			update.Message.HasDocument()) {
-		message = update.Message
-	} else if update.HasEditedMessage() &&
-		(update.EditedMessage.HasText() ||
-			update.EditedMessage.HasPhoto() ||
-			update.EditedMessage.HasVideo() ||
-			update.EditedMessage.HasVideoNote() ||
-			update.EditedMessage.HasAudio() ||
-			update.EditedMessage.HasVoice() ||
-			update.EditedMessage.HasDocument()) {
-		message = update.EditedMessage
-	}
-
-	return message
-}
-
-// convert telegram bot message into chat messages
-func chatMessagesFromTGMessage(bot *tg.Bot, message tg.Message, otherGroupedMessages ...tg.Message) (parent, original *chatMessage, err error) {
-	replyTo := repliedToMessage(message)
-	errs := []error{}
-
-	// chat message 1 (parent message)
-	if replyTo != nil {
-		if chatMessage, err := convertMessage(bot, *replyTo); err == nil {
-			parent = chatMessage
-		} else {
-			errs = append(errs, err)
-		}
-	}
-
-	// chat message 2 (original message)
-	if chatMessage, err := convertMessage(bot, message, otherGroupedMessages...); err == nil {
-		original = chatMessage
-	} else {
-		errs = append(errs, err)
-	}
-
-	return parent, original, errors.Join(errs...)
 }
 
 // send given text to the chat
@@ -564,7 +467,7 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 						URI:      file.URI,
 					})
 
-					fileNames = append(fileNames, file.Name) // FIXME: will wait for it to become active
+					fileNames = append(fileNames, file.Name) // FIXME: synchronously wait for it to become active
 				} else {
 					log.Printf("failed to upload file(%s) for prompt: %s", mimeType, redact(conf, err))
 				}
@@ -809,397 +712,5 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 			// save to database (error)
 			savePromptAndResult(db, chatID, userID, username, messagesToPrompt(parent, original), 0, error, 0, false)
 		}
-	}
-}
-
-// wait for all files to be active
-func waitForFiles(ctx context.Context, conf config, client *genai.Client, fileNames []string) {
-	if conf.Verbose {
-		log.Printf("[verbose] will wait for %d file(s) to become active", len(fileNames))
-	}
-
-	var wg sync.WaitGroup
-	for _, fileName := range fileNames {
-		wg.Add(1)
-
-		go func(name string) {
-			for {
-				if file, err := client.GetFile(ctx, name); err == nil {
-					if file.State == genai.FileStateActive {
-						wg.Done()
-						break
-					} else {
-						time.Sleep(uploadedFileStateCheckIntervalMilliseconds * time.Millisecond)
-					}
-				}
-			}
-		}(fileName)
-	}
-	wg.Wait()
-
-	if conf.Verbose {
-		log.Printf("[verbose] %d file(s) now active", len(fileNames))
-	}
-}
-
-// generate safety settings for all supported harm categories
-func safetySettings(threshold genai.HarmBlockThreshold) (settings []*genai.SafetySetting) {
-	for _, category := range []genai.HarmCategory{
-		/*
-			// categories for PaLM 2 (Legacy) models
-			genai.HarmCategoryUnspecified,
-			genai.HarmCategoryDerogatory,
-			genai.HarmCategoryToxicity,
-			genai.HarmCategoryViolence,
-			genai.HarmCategorySexual,
-			genai.HarmCategoryMedical,
-			genai.HarmCategoryDangerous,
-		*/
-
-		// all categories supported by Gemini models
-		genai.HarmCategoryHarassment,
-		genai.HarmCategoryHateSpeech,
-		genai.HarmCategorySexuallyExplicit,
-		genai.HarmCategoryDangerousContent,
-	} {
-		settings = append(settings, &genai.SafetySetting{
-			Category:  category,
-			Threshold: threshold,
-		})
-	}
-
-	return settings
-}
-
-// generate user's name
-func userName(user *tg.User) string {
-	if user.Username != nil {
-		return fmt.Sprintf("@%s (%s)", *user.Username, user.FirstName)
-	} else {
-		return user.FirstName
-	}
-}
-
-// generate user's name from update
-func userNameFromUpdate(update tg.Update) string {
-	if from := update.GetFrom(); from != nil {
-		return userName(from)
-	} else {
-		return "unknown"
-	}
-}
-
-// get original message which was replied by given `message`
-func repliedToMessage(message tg.Message) *tg.Message {
-	if message.HasReplyToMessage() {
-		return message.ReplyToMessage
-	}
-
-	return nil
-}
-
-// convert given telegram bot message to an genai chat message,
-//
-// (if it was sent from bot, make it an assistant's message)
-func convertMessage(bot *tg.Bot, message tg.Message, otherGroupedMessages ...tg.Message) (cm *chatMessage, err error) {
-	var role chatMessageRole
-	if message.IsBot() {
-		role = chatMessageRoleModel
-	} else {
-		role = chatMessageRoleUser
-	}
-
-	if message.HasText() {
-		return &chatMessage{
-			role: role,
-			text: *message.Text,
-		}, nil
-	} else if message.HasPhoto() || message.HasVideo() || message.HasVideoNote() || message.HasAudio() || message.HasVoice() || message.HasDocument() {
-		var text string
-		if message.HasCaption() {
-			text = *message.Caption
-		} else {
-			text = defaultPromptForMedias
-		}
-
-		allMessages := append([]tg.Message{message}, otherGroupedMessages...)
-
-		allFiles := [][]byte{}
-		for _, msg := range allMessages {
-			if files, err := filesFromMessage(bot, msg); err == nil {
-				allFiles = append(allFiles, files...)
-			} else {
-				return nil, err
-			}
-		}
-
-		return &chatMessage{
-			role:  role,
-			text:  text,
-			files: allFiles,
-		}, nil
-	} else {
-		err = fmt.Errorf("failed to convert message: not a supported type")
-	}
-
-	return nil, err
-}
-
-// extract file bytes from given message
-func filesFromMessage(bot *tg.Bot, message tg.Message) (files [][]byte, err error) {
-	var bytes []byte
-	if message.HasPhoto() {
-		files = [][]byte{}
-
-		for _, photo := range message.Photo {
-			if bytes, err = readMedia(bot, "photo", photo.FileID); err == nil {
-				files = append(files, bytes)
-			} else {
-				err = fmt.Errorf("failed to read photo content: %s", err)
-				break
-			}
-		}
-
-		if err == nil {
-			return files, nil
-		}
-	} else if message.HasVideo() {
-		if bytes, err = readMedia(bot, "video", message.Video.FileID); err == nil {
-			return [][]byte{bytes}, nil
-		} else {
-			err = fmt.Errorf("failed to read video content: %s", err)
-		}
-	} else if message.HasVideoNote() {
-		if bytes, err = readMedia(bot, "video note", message.VideoNote.FileID); err == nil {
-			return [][]byte{bytes}, nil
-		} else {
-			err = fmt.Errorf("failed to read video note content: %s", err)
-		}
-	} else if message.HasAudio() {
-		if bytes, err = readMedia(bot, "audio", message.Audio.FileID); err == nil {
-			return [][]byte{bytes}, nil
-		} else {
-			err = fmt.Errorf("failed to read audio content: %s", err)
-		}
-	} else if message.HasVoice() {
-		if bytes, err = readMedia(bot, "voice", message.Voice.FileID); err == nil {
-			return [][]byte{bytes}, nil
-		} else {
-			err = fmt.Errorf("failed to read voice content: %s", err)
-		}
-	} else if message.HasDocument() {
-		if bytes, err = readMedia(bot, "document", message.Document.FileID); err == nil {
-			return [][]byte{bytes}, nil
-		} else {
-			err = fmt.Errorf("failed to read document content: %s", err)
-		}
-	}
-
-	return nil, err
-}
-
-// read bytes from given media
-func readMedia(bot *tg.Bot, mediaType, fileID string) (result []byte, err error) {
-	if res := bot.GetFile(fileID); !res.Ok {
-		err = fmt.Errorf("Failed to read bytes from %s: %s", mediaType, *res.Description)
-	} else {
-		fileURL := bot.GetFileURL(*res.Result)
-		result, err = readFileContentAtURL(fileURL)
-	}
-
-	return result, err
-}
-
-// read file content at given url
-func readFileContentAtURL(url string) (content []byte, err error) {
-	httpClient := http.Client{
-		Timeout: time.Second * readURLContentTimeoutSeconds,
-	}
-
-	var resp *http.Response
-	resp, err = httpClient.Get(url)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	content, err = io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	return content, nil
-}
-
-// convert chat messages to a prompt for logging
-func messagesToPrompt(parent, original *chatMessage) string {
-	messages := []chatMessage{}
-	if parent != nil {
-		messages = append(messages, *parent)
-	}
-	if original != nil {
-		messages = append(messages, *original)
-	}
-
-	lines := []string{}
-
-	for _, message := range messages {
-		if len(message.files) > 0 {
-			lines = append(lines, fmt.Sprintf("[%s] %s (%d file(s))", message.role, message.text, len(message.files)))
-		} else {
-			lines = append(lines, fmt.Sprintf("[%s] %s", message.role, message.text))
-		}
-	}
-
-	return strings.Join(lines, "\n--------\n")
-}
-
-// retrieve stats from database
-func retrieveStats(db *Database) string {
-	if db == nil {
-		return msgDatabaseNotConfigured
-	} else {
-		lines := []string{}
-
-		var prompt Prompt
-		if tx := db.db.First(&prompt); tx.Error == nil {
-			lines = append(lines, fmt.Sprintf("Since %s", prompt.CreatedAt.Format("2006-01-02 15:04:05")))
-			lines = append(lines, "")
-		}
-
-		printer := message.NewPrinter(language.English) // for adding commas to numbers
-
-		var count int64
-		if tx := db.db.Table("prompts").Select("count(distinct chat_id) as count").Scan(&count); tx.Error == nil {
-			lines = append(lines, fmt.Sprintf("Chats: %s", printer.Sprintf("%d", count)))
-		}
-
-		var sumAndCount struct {
-			Sum   int64
-			Count int64
-		}
-		if tx := db.db.Table("prompts").Select("sum(tokens) as sum, count(id) as count").Where("tokens > 0").Scan(&sumAndCount); tx.Error == nil {
-			lines = append(lines, fmt.Sprintf("Prompts: %s (Total tokens: %s)", printer.Sprintf("%d", sumAndCount.Count), printer.Sprintf("%d", sumAndCount.Sum)))
-		}
-		if tx := db.db.Table("generateds").Select("sum(tokens) as sum, count(id) as count").Where("successful = 1").Scan(&sumAndCount); tx.Error == nil {
-			lines = append(lines, fmt.Sprintf("Completions: %s (Total tokens: %s)", printer.Sprintf("%d", sumAndCount.Count), printer.Sprintf("%d", sumAndCount.Sum)))
-		}
-		if tx := db.db.Table("generateds").Select("count(id) as count").Where("successful = 0").Scan(&count); tx.Error == nil {
-			lines = append(lines, fmt.Sprintf("Errors: %s", printer.Sprintf("%d", count)))
-		}
-
-		if len(lines) > 0 {
-			return strings.Join(lines, "\n")
-		}
-
-		return msgDatabaseEmpty
-	}
-}
-
-// save prompt and its result to logs database
-func savePromptAndResult(db *Database, chatID, userID int64, username string, prompt string, promptTokens uint, result string, resultTokens uint, resultSuccessful bool) {
-	if db != nil {
-		if err := db.SavePrompt(Prompt{
-			ChatID:   chatID,
-			UserID:   userID,
-			Username: username,
-			Text:     prompt,
-			Tokens:   promptTokens,
-			Result: Generated{
-				Successful: resultSuccessful,
-				Text:       result,
-				Tokens:     resultTokens,
-			},
-		}); err != nil {
-			log.Printf("failed to save prompt & result to database: %s", err)
-		}
-	}
-}
-
-// generate a help message with version info
-func helpMessage(conf config) string {
-	return fmt.Sprintf(msgHelp, *conf.GoogleGenerativeModel, *conf.GoogleMultimodalModel, version.Build(version.OS|version.Architecture|version.Revision))
-}
-
-// return a /start command handler
-func startCommandHandler(conf config, allowedUsers map[string]bool) func(b *tg.Bot, update tg.Update, args string) {
-	return func(b *tg.Bot, update tg.Update, _ string) {
-		if !isAllowed(update, allowedUsers) {
-			log.Printf("start command not allowed: %s", userNameFromUpdate(update))
-			return
-		}
-
-		message := usableMessageFromUpdate(update)
-		if message == nil {
-			log.Printf("no usable message from update.")
-			return
-		}
-
-		chatID := message.Chat.ID
-
-		_, _ = sendMessage(b, conf, msgStart, chatID, nil)
-	}
-}
-
-// return a /stats command handler
-func statsCommandHandler(conf config, db *Database, allowedUsers map[string]bool) func(b *tg.Bot, update tg.Update, args string) {
-	return func(b *tg.Bot, update tg.Update, args string) {
-		if !isAllowed(update, allowedUsers) {
-			log.Printf("stats command not allowed: %s", userNameFromUpdate(update))
-			return
-		}
-
-		message := usableMessageFromUpdate(update)
-		if message == nil {
-			log.Printf("no usable message from update.")
-			return
-		}
-
-		chatID := message.Chat.ID
-		messageID := message.MessageID
-
-		_, _ = sendMessage(b, conf, retrieveStats(db), chatID, &messageID)
-	}
-}
-
-// return a /help command handler
-func helpCommandHandler(conf config, allowedUsers map[string]bool) func(b *tg.Bot, update tg.Update, args string) {
-	return func(b *tg.Bot, update tg.Update, _ string) {
-		if !isAllowed(update, allowedUsers) {
-			log.Printf("help command not allowed: %s", userNameFromUpdate(update))
-			return
-		}
-
-		message := usableMessageFromUpdate(update)
-		if message == nil {
-			log.Printf("no usable message from update.")
-			return
-		}
-
-		chatID := message.Chat.ID
-		messageID := message.MessageID
-
-		_, _ = sendMessage(b, conf, helpMessage(conf), chatID, &messageID)
-	}
-}
-
-// return a 'no such command' handler
-func noSuchCommandHandler(conf config, allowedUsers map[string]bool) func(b *tg.Bot, update tg.Update, cmd, args string) {
-	return func(b *tg.Bot, update tg.Update, cmd, args string) {
-		if !isAllowed(update, allowedUsers) {
-			log.Printf("command not allowed: %s", userNameFromUpdate(update))
-			return
-		}
-
-		message := usableMessageFromUpdate(update)
-		if message == nil {
-			log.Printf("no usable message from update.")
-			return
-		}
-
-		chatID := message.Chat.ID
-		messageID := message.MessageID
-
-		_, _ = sendMessage(b, conf, fmt.Sprintf(msgCmdNotSupported, cmd), chatID, &messageID)
 	}
 }
