@@ -582,14 +582,11 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 				}
 			} else {
 				if err != iterator.Done {
-					var error string
-					var gerr *googleapi.Error
-					if errors.As(err, &gerr) {
-						error = gerror(conf, gerr)
-					} else {
-						error = redact(conf, err)
-					}
+					error := errorString(conf, err)
+
 					log.Printf("failed to iterate stream: %s", error)
+
+					_, _ = sendMessage(bot, conf, fmt.Sprintf("Failed to iterate stream: %s", error), chatID, nil)
 				}
 				break
 			}
@@ -697,15 +694,9 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 				}
 			}
 		} else {
-			var error string
-			var gerr *googleapi.Error
-			if errors.As(err, &gerr) {
-				error = gerror(conf, gerr)
-			} else {
-				error = redact(conf, err)
-			}
+			error := errorString(conf, err)
 
-			log.Printf("failed to create chat completion: %s", error)
+			log.Printf("failed to generate an answer from Gemini: %s", error)
 
 			_, _ = sendMessage(bot, conf, fmt.Sprintf("Failed to generate an answer from Gemini: %s", error), chatID, &messageID)
 
@@ -713,4 +704,16 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 			savePromptAndResult(db, chatID, userID, username, messagesToPrompt(parent, original), 0, error, 0, false)
 		}
 	}
+}
+
+// convert error to string
+func errorString(conf config, err error) (error string) {
+	var gerr *googleapi.Error
+	if errors.As(err, &gerr) {
+		error = gerror(conf, gerr)
+	} else {
+		error = redact(conf, err)
+	}
+
+	return error
 }
