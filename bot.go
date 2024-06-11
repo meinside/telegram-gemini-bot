@@ -211,18 +211,21 @@ func runBot(conf config) {
 		log.Printf("launching bot: %s", userName(b.Result))
 
 		// clear things
-		files := client.ListFiles(ctx)
-		for {
-			if file, err := files.Next(); err == nil {
-				if err := client.DeleteFile(ctx, file.Name); err != nil {
-					log.Printf("failed to delete cloud file: %s", err)
+		if files := client.ListFiles(ctx); files != nil {
+			for {
+				if file, err := files.Next(); err == nil {
+					if err := client.DeleteFile(ctx, file.Name); err != nil {
+						log.Printf("failed to delete cloud file: %s", err)
+					}
+				} else {
+					if err == iterator.Done {
+						break
+					}
+					log.Printf("failed to iterate cloud files: %s", err)
 				}
-			} else {
-				if err == iterator.Done {
-					break
-				}
-				log.Printf("failed to iterate cloud files: %s", err)
 			}
+		} else {
+			log.Printf("failed to list files for deletion")
 		}
 
 		// database

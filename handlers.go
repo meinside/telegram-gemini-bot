@@ -127,6 +127,10 @@ func waitForFiles(ctx context.Context, conf config, client *genai.Client, fileNa
 					} else {
 						time.Sleep(uploadedFileStateCheckIntervalMilliseconds * time.Millisecond)
 					}
+				} else {
+					log.Printf("failed to get file: %s", err)
+
+					time.Sleep(uploadedFileStateCheckIntervalMilliseconds * time.Millisecond)
 				}
 			}
 		}(fileName)
