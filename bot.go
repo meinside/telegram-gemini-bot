@@ -27,8 +27,7 @@ import (
 
 // constants for default values
 const (
-	defaultGenerationModel      = "gemini-pro"
-	defaultMultimodalModel      = "gemini-pro-vision"
+	defaultGenerativeModel      = "gemini-1.5-pro-latest"
 	defaultAIHarmBlockThreshold = 3
 
 	defaultSystemInstruction = "You are a Telegram bot with a backend system which uses the Google Gemini API. Respond to the user's message as precisely as possible. Your response must be in plain text."
@@ -51,7 +50,7 @@ const (
 /stats : show stats of this bot.
 /help : show this help message.
 
-- models: %s / %s
+- model: %s
 - version: %s
 `
 
@@ -76,7 +75,6 @@ type config struct {
 	SystemInstruction *string `json:"system_instruction,omitempty"`
 
 	GoogleGenerativeModel *string `json:"google_generative_model,omitempty"`
-	GoogleMultimodalModel *string `json:"google_multimodal_model,omitempty"`
 
 	// google ai safety settings threshold
 	GoogleAIHarmBlockThreshold *int `json:"google_ai_harm_block_threshold,omitempty"`
@@ -146,10 +144,7 @@ func loadConfig(fpath string) (conf config, err error) {
 					conf.SystemInstruction = ptr(defaultSystemInstruction)
 				}
 				if conf.GoogleGenerativeModel == nil {
-					conf.GoogleGenerativeModel = ptr(defaultGenerationModel)
-				}
-				if conf.GoogleMultimodalModel == nil {
-					conf.GoogleMultimodalModel = ptr(defaultMultimodalModel)
+					conf.GoogleGenerativeModel = ptr(defaultGenerativeModel)
 				}
 				if conf.GoogleAIHarmBlockThreshold == nil {
 					conf.GoogleAIHarmBlockThreshold = ptr(defaultAIHarmBlockThreshold)
@@ -424,24 +419,15 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 	// leave a reaction on the original message for confirmation
 	_ = bot.SetMessageReaction(chatID, messageID, tg.NewMessageReactionWithEmoji("👌"))
 
-	multimodal := (original != nil && len(original.files) > 0) || (parent != nil && len(parent.files) > 0)
-
 	// model
-	var model *genai.GenerativeModel
-	if multimodal {
-		model = client.GenerativeModel(*conf.GoogleMultimodalModel)
-	} else {
-		model = client.GenerativeModel(*conf.GoogleGenerativeModel)
-	}
+	model := client.GenerativeModel(*conf.GoogleGenerativeModel)
 
 	// set system instruction
-	if !multimodal { // NOTE: FIXME: some multimodal models (eg. `gemini-pro-vision`) do not support system instructions yet
-		model.SystemInstruction = &genai.Content{
-			Role: string(chatMessageRoleModel),
-			Parts: []genai.Part{
-				genai.Text(*conf.SystemInstruction),
-			},
-		}
+	model.SystemInstruction = &genai.Content{
+		Role: string(chatMessageRoleModel),
+		Parts: []genai.Part{
+			genai.Text(*conf.SystemInstruction),
+		},
 	}
 
 	fileNames := []string{}

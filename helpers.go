@@ -104,5 +104,5 @@ func chatMessagesFromTGMessage(bot *tg.Bot, message tg.Message, otherGroupedMess
 
 // generate a help message with version info
 func helpMessage(conf config) string {
-	return fmt.Sprintf(msgHelp, *conf.GoogleGenerativeModel, *conf.GoogleMultimodalModel, version.Build(version.OS|version.Architecture|version.Revision))
+	return fmt.Sprintf(msgHelp, *conf.GoogleGenerativeModel, version.Build(version.OS|version.Architecture|version.Revision))
 }
