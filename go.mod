@@ -4,7 +4,7 @@ go 1.21.3
 
 require (
 	github.com/google/generative-ai-go v0.13.0
-	github.com/meinside/infisical-go v0.3.1
+	github.com/meinside/infisical-go v0.4.0
 	github.com/meinside/telegram-bot-go v0.11.1
 	github.com/meinside/version-go v0.0.3
 	github.com/tailscale/hujson v0.0.0-20221223112325-20486734a56a
