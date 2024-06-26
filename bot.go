@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -19,19 +18,26 @@ import (
 	tg "github.com/meinside/telegram-bot-go"
 
 	"github.com/google/generative-ai-go/genai"
-	"github.com/tailscale/hujson"
-	"google.golang.org/api/googleapi"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 )
 
 // constants for default values
 const (
-	defaultGenerationModel      = "gemini-pro"
-	defaultMultimodalModel      = "gemini-pro-vision"
+	defaultGenerativeModel      = "gemini-1.5-pro-latest"
 	defaultAIHarmBlockThreshold = 3
 
-	defaultSystemInstruction = "You are a Telegram bot with a backend system which uses the Google Gemini API. Respond to the user's message as precisely as possible. Your response must be in plain text."
+	defaultSystemInstructionFormat = `You are a Telegram bot which is built with Golang and Google Gemini API(model: %s).
+
+Current datetime is %s.
+
+Respond to user messages according to the following principles:
+- Do not repeat the user's request.
+- Be as accurate as possible.
+- Be as truthful as possible.
+- Be as comprehensive and informative as possible.
+- Be as concise and meaningful as possible.
+`
 )
 
 const (
@@ -51,7 +57,7 @@ const (
 /stats : show stats of this bot.
 /help : show this help message.
 
-- models: %s / %s
+- model: %s
 - version: %s
 `
 
@@ -76,7 +82,6 @@ type config struct {
 	SystemInstruction *string `json:"system_instruction,omitempty"`
 
 	GoogleGenerativeModel *string `json:"google_generative_model,omitempty"`
-	GoogleMultimodalModel *string `json:"google_multimodal_model,omitempty"`
 
 	// google ai safety settings threshold
 	GoogleAIHarmBlockThreshold *int `json:"google_ai_harm_block_threshold,omitempty"`
@@ -142,14 +147,8 @@ func loadConfig(fpath string) (conf config, err error) {
 				}
 
 				// set default/fallback values
-				if conf.SystemInstruction == nil {
-					conf.SystemInstruction = ptr(defaultSystemInstruction)
-				}
 				if conf.GoogleGenerativeModel == nil {
-					conf.GoogleGenerativeModel = ptr(defaultGenerationModel)
-				}
-				if conf.GoogleMultimodalModel == nil {
-					conf.GoogleMultimodalModel = ptr(defaultMultimodalModel)
+					conf.GoogleGenerativeModel = ptr(defaultGenerativeModel)
 				}
 				if conf.GoogleAIHarmBlockThreshold == nil {
 					conf.GoogleAIHarmBlockThreshold = ptr(defaultAIHarmBlockThreshold)
@@ -167,22 +166,6 @@ func loadConfig(fpath string) (conf config, err error) {
 	}
 
 	return conf, err
-}
-
-// standardize given JSON (JWCC) bytes
-func standardizeJSON(b []byte) ([]byte, error) {
-	ast, err := hujson.Parse(b)
-	if err != nil {
-		return b, err
-	}
-	ast.Standardize()
-
-	return ast.Pack(), nil
-}
-
-// get the address (pointer) of a value
-func ptr[T any](v T) *T {
-	return &v
 }
 
 // launch bot with given parameters
@@ -367,6 +350,7 @@ func sendMessage(bot *tg.Bot, conf config, message string, chatID int64, message
 			MessageID: *messageID,
 		})
 	}
+
 	if res := bot.SendMessage(chatID, message, options); res.Ok {
 		sentMessageID = res.Result.MessageID
 	} else {
@@ -386,6 +370,7 @@ func updateMessage(bot *tg.Bot, conf config, message string, chatID int64, messa
 
 	options := tg.OptionsEditMessageText{}.
 		SetIDs(chatID, messageID)
+
 	if res := bot.EditMessageText(message, options); !res.Ok {
 		err = fmt.Errorf("failed to send message: %s (requested message: %s)", *res.Description, message)
 	}
@@ -424,24 +409,21 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 	// leave a reaction on the original message for confirmation
 	_ = bot.SetMessageReaction(chatID, messageID, tg.NewMessageReactionWithEmoji("👌"))
 
-	multimodal := (original != nil && len(original.files) > 0) || (parent != nil && len(parent.files) > 0)
-
 	// model
-	var model *genai.GenerativeModel
-	if multimodal {
-		model = client.GenerativeModel(*conf.GoogleMultimodalModel)
-	} else {
-		model = client.GenerativeModel(*conf.GoogleGenerativeModel)
-	}
+	model := client.GenerativeModel(*conf.GoogleGenerativeModel)
 
 	// set system instruction
-	if !multimodal { // NOTE: FIXME: some multimodal models (eg. `gemini-pro-vision`) do not support system instructions yet
-		model.SystemInstruction = &genai.Content{
-			Role: string(chatMessageRoleModel),
-			Parts: []genai.Part{
-				genai.Text(*conf.SystemInstruction),
-			},
-		}
+	var systemInstruction string
+	if conf.SystemInstruction == nil {
+		systemInstruction = defaultSystemInstruction(conf)
+	} else {
+		systemInstruction = *conf.SystemInstruction
+	}
+	model.SystemInstruction = &genai.Content{
+		Role: string(chatMessageRoleModel),
+		Parts: []genai.Part{
+			genai.Text(systemInstruction),
+		},
 	}
 
 	fileNames := []string{}
@@ -709,14 +691,10 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 	}
 }
 
-// convert error to string
-func errorString(conf config, err error) (error string) {
-	var gerr *googleapi.Error
-	if errors.As(err, &gerr) {
-		error = gerror(conf, gerr)
-	} else {
-		error = redact(conf, err)
-	}
-
-	return error
+// generate a default system instruction with given configuration
+func defaultSystemInstruction(conf config) string {
+	return fmt.Sprintf(defaultSystemInstructionFormat,
+		time.Now().Format("2006-01-02 15:04:05 (Mon)"),
+		*conf.GoogleGenerativeModel,
+	)
 }

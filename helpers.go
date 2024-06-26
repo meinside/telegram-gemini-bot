@@ -11,6 +11,7 @@ import (
 
 	tg "github.com/meinside/telegram-bot-go"
 	"github.com/meinside/version-go"
+	"github.com/tailscale/hujson"
 	"google.golang.org/api/googleapi"
 )
 
@@ -104,5 +105,36 @@ func chatMessagesFromTGMessage(bot *tg.Bot, message tg.Message, otherGroupedMess
 
 // generate a help message with version info
 func helpMessage(conf config) string {
-	return fmt.Sprintf(msgHelp, *conf.GoogleGenerativeModel, *conf.GoogleMultimodalModel, version.Build(version.OS|version.Architecture|version.Revision))
+	return fmt.Sprintf(msgHelp,
+		*conf.GoogleGenerativeModel,
+		version.Build(version.OS|version.Architecture|version.Revision),
+	)
+}
+
+// convert error to string
+func errorString(conf config, err error) (error string) {
+	var gerr *googleapi.Error
+	if errors.As(err, &gerr) {
+		error = gerror(conf, gerr)
+	} else {
+		error = redact(conf, err)
+	}
+
+	return error
+}
+
+// standardize given JSON (JWCC) bytes
+func standardizeJSON(b []byte) ([]byte, error) {
+	ast, err := hujson.Parse(b)
+	if err != nil {
+		return b, err
+	}
+	ast.Standardize()
+
+	return ast.Pack(), nil
+}
+
+// get the address (pointer) of a value
+func ptr[T any](v T) *T {
+	return &v
 }

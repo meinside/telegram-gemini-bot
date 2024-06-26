@@ -44,11 +44,7 @@ and set your values:
 
 ```json
 {
-  "system_instruction": "You are a Telegram bot with a backend system which uses the Google Gemini API. Respond to the user's message as precisely as possible.",
-
-  "google_generative_model": "gemini-pro",
-  "google_multimodal_model": "gemini-pro-vision",
-
+  "google_generative_model": "gemini-1.5-pro-latest",
   "google_ai_harm_block_threshold": 3,
 
   "allowed_telegram_users": ["user1", "user2"],
@@ -72,9 +68,7 @@ You can use [Infisical](https://infisical.com/) for saving & retrieving your bot
 
 ```json
 {
-  "google_generative_model": "gemini-pro",
-  "google_multimodal_model": "gemini-pro-vision",
-
+  "google_generative_model": "gemini-1.5-pro-latest",
   "google_ai_harm_block_threshold": 3,
 
   "allowed_telegram_users": ["user1", "user2"],
