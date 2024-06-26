@@ -27,7 +27,17 @@ const (
 	defaultGenerativeModel      = "gemini-1.5-pro-latest"
 	defaultAIHarmBlockThreshold = 3
 
-	defaultSystemInstruction = "You are a Telegram bot with a backend system which uses the Google Gemini API. Respond to the user's message as precisely as possible. Your response must be in plain text."
+	defaultSystemInstructionFormat = `You are a Telegram bot which is built with Golang and Google Gemini API(model: %s).
+
+Current datetime is %s.
+
+Respond to user messages according to the following principles:
+- Do not repeat the user's request.
+- Be as accurate as possible.
+- Be as truthful as possible.
+- Be as comprehensive and informative as possible.
+- Be as concise and meaningful as possible.
+`
 )
 
 const (
@@ -137,9 +147,6 @@ func loadConfig(fpath string) (conf config, err error) {
 				}
 
 				// set default/fallback values
-				if conf.SystemInstruction == nil {
-					conf.SystemInstruction = ptr(defaultSystemInstruction)
-				}
 				if conf.GoogleGenerativeModel == nil {
 					conf.GoogleGenerativeModel = ptr(defaultGenerativeModel)
 				}
@@ -406,10 +413,16 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 	model := client.GenerativeModel(*conf.GoogleGenerativeModel)
 
 	// set system instruction
+	var systemInstruction string
+	if conf.SystemInstruction == nil {
+		systemInstruction = defaultSystemInstruction(conf)
+	} else {
+		systemInstruction = *conf.SystemInstruction
+	}
 	model.SystemInstruction = &genai.Content{
 		Role: string(chatMessageRoleModel),
 		Parts: []genai.Part{
-			genai.Text(*conf.SystemInstruction),
+			genai.Text(systemInstruction),
 		},
 	}
 
@@ -676,4 +689,12 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 			savePromptAndResult(db, chatID, userID, username, messagesToPrompt(parent, original), 0, error, 0, false)
 		}
 	}
+}
+
+// generate a default system instruction with given configuration
+func defaultSystemInstruction(conf config) string {
+	return fmt.Sprintf(defaultSystemInstructionFormat,
+		time.Now().Format("2006-01-02 15:04:05 (Mon)"),
+		*conf.GoogleGenerativeModel,
+	)
 }
