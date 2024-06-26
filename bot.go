@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -19,8 +18,6 @@ import (
 	tg "github.com/meinside/telegram-bot-go"
 
 	"github.com/google/generative-ai-go/genai"
-	"github.com/tailscale/hujson"
-	"google.golang.org/api/googleapi"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 )
@@ -162,22 +159,6 @@ func loadConfig(fpath string) (conf config, err error) {
 	}
 
 	return conf, err
-}
-
-// standardize given JSON (JWCC) bytes
-func standardizeJSON(b []byte) ([]byte, error) {
-	ast, err := hujson.Parse(b)
-	if err != nil {
-		return b, err
-	}
-	ast.Standardize()
-
-	return ast.Pack(), nil
-}
-
-// get the address (pointer) of a value
-func ptr[T any](v T) *T {
-	return &v
 }
 
 // launch bot with given parameters
@@ -362,6 +343,7 @@ func sendMessage(bot *tg.Bot, conf config, message string, chatID int64, message
 			MessageID: *messageID,
 		})
 	}
+
 	if res := bot.SendMessage(chatID, message, options); res.Ok {
 		sentMessageID = res.Result.MessageID
 	} else {
@@ -381,6 +363,7 @@ func updateMessage(bot *tg.Bot, conf config, message string, chatID int64, messa
 
 	options := tg.OptionsEditMessageText{}.
 		SetIDs(chatID, messageID)
+
 	if res := bot.EditMessageText(message, options); !res.Ok {
 		err = fmt.Errorf("failed to send message: %s (requested message: %s)", *res.Description, message)
 	}
@@ -693,16 +676,4 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 			savePromptAndResult(db, chatID, userID, username, messagesToPrompt(parent, original), 0, error, 0, false)
 		}
 	}
-}
-
-// convert error to string
-func errorString(conf config, err error) (error string) {
-	var gerr *googleapi.Error
-	if errors.As(err, &gerr) {
-		error = gerror(conf, gerr)
-	} else {
-		error = redact(conf, err)
-	}
-
-	return error
 }
