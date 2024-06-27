@@ -143,6 +143,7 @@ and `systemctl` enable|start|restart|stop the service.
 - [X] Add ways of informing users about the status of background processes.
   - Will add reactions on successfully received or generated messages.
 - [X] Process media files properly.
+- [X] Handle inline queries. (Will show last 5 prompts & results requested by the user)
 - [ ] Handle markdown texts gracefully.
 
 ## License

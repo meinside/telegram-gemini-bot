@@ -91,6 +91,35 @@ func savePromptAndResult(db *Database, chatID, userID int64, username string, pr
 	}
 }
 
+const (
+	numSuccessfulPromptsToLoad = 5
+)
+
+// load recent `prompt`s and their results.
+func (d *Database) loadSuccessfulPrompts(userID int64) (result []Prompt, err error) {
+	tx := d.db.Model(&Prompt{}).
+		Preload("Result").
+		Where("user_id = ?", userID).
+		Order("created_at DESC").
+		Limit(numSuccessfulPromptsToLoad).
+		Find(&result)
+	return result, tx.Error
+}
+
+// retrieve successful prompts and their results
+func retrieveSuccessfulPrompts(db *Database, userID int64) (result []Prompt) {
+	result = []Prompt{}
+
+	if db != nil {
+		var err error
+		if result, err = db.loadSuccessfulPrompts(userID); err != nil {
+			log.Printf("failed to load prompts from database: %s", err)
+		}
+	}
+
+	return result
+}
+
 // retrieve stats from database
 func retrieveStats(db *Database) string {
 	if db == nil {
