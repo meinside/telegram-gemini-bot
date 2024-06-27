@@ -45,6 +45,8 @@ func isAllowed(update tg.Update, allowedUsers map[string]bool) bool {
 		username = *update.Message.From.Username
 	} else if update.HasEditedMessage() && update.EditedMessage.From.Username != nil {
 		username = *update.EditedMessage.From.Username
+	} else if update.HasInlineQuery() && update.InlineQuery.From.Username != nil {
+		username = *update.InlineQuery.From.Username
 	}
 
 	if _, exists := allowedUsers[username]; exists {

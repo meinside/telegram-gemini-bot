@@ -13,13 +13,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/generative-ai-go/genai"
+	"golang.org/x/text/language"
+	"golang.org/x/text/message"
+	"google.golang.org/api/iterator"
+	"google.golang.org/api/option"
+
 	"github.com/meinside/infisical-go"
 	"github.com/meinside/infisical-go/helper"
 	tg "github.com/meinside/telegram-bot-go"
-
-	"github.com/google/generative-ai-go/genai"
-	"google.golang.org/api/iterator"
-	"google.golang.org/api/option"
 )
 
 // constants for default values
@@ -239,6 +241,43 @@ func runBot(conf config) {
 
 			handleMessages(ctx, b, client, conf, db, updates, &mediaGroupID)
 		})
+		bot.SetInlineQueryHandler(func(b *tg.Bot, update tg.Update, inlineQuery tg.InlineQuery) {
+			options := tg.OptionsAnswerInlineQuery{}.
+				SetIsPersonal(true).
+				SetNextOffset("") // no more results
+
+			results := []any{}
+			prompts := retrieveSuccessfulPrompts(db, inlineQuery.From.ID)
+			if len(prompts) > 0 {
+				printer := message.NewPrinter(language.English) // for adding commas to numbers
+
+				for _, prompt := range prompts {
+					article, _ := tg.NewInlineQueryResultArticle(
+						prompt.Text,
+						prompt.Result.Text,
+						fmt.Sprintf(
+							"Tokens: input %s, output: %s",
+							printer.Sprintf("%d", prompt.Tokens),
+							printer.Sprintf("%d", prompt.Result.Tokens),
+						),
+					)
+
+					results = append(results, article)
+				}
+			} else {
+				article, _ := tg.NewInlineQueryResultArticle(
+					"No result",
+					"There was no successful prompt for this user.",
+					"There was no successful prompt for this user.",
+				)
+
+				results = append(results, article)
+			}
+
+			if result := bot.AnswerInlineQuery(inlineQuery.ID, results, options); !result.Ok {
+				log.Printf("failed to answer inline query: %s", *result.Description)
+			}
+		})
 
 		// set command handlers
 		bot.AddCommandHandler(cmdStart, startCommandHandler(conf, allowedUsers))
@@ -250,7 +289,7 @@ func runBot(conf config) {
 		bot.StartPollingUpdates(0, intervalSeconds, func(b *tg.Bot, update tg.Update, err error) {
 			if err == nil {
 				if !isAllowed(update, allowedUsers) {
-					log.Printf("not allowed: %s", userNameFromUpdate(update))
+					log.Printf("user not allowed: %s", userNameFromUpdate(update))
 					return
 				}
 
