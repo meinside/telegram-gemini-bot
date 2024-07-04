@@ -87,6 +87,22 @@ func helpCommandHandler(conf config, allowedUsers map[string]bool) func(b *tg.Bo
 	}
 }
 
+// return a /privacy command handler
+func privacyCommandHandler(conf config) func(b *tg.Bot, update tg.Update, args string) {
+	return func(b *tg.Bot, update tg.Update, _ string) {
+		message := usableMessageFromUpdate(update)
+		if message == nil {
+			log.Printf("no usable message from update.")
+			return
+		}
+
+		chatID := message.Chat.ID
+		messageID := message.MessageID
+
+		_, _ = sendMessage(b, conf, msgPrivacy, chatID, &messageID)
+	}
+}
+
 // return a 'no such command' handler
 func noSuchCommandHandler(conf config, allowedUsers map[string]bool) func(b *tg.Bot, update tg.Update, cmd, args string) {
 	return func(b *tg.Bot, update tg.Update, cmd, args string) {

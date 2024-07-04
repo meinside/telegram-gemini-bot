@@ -46,9 +46,10 @@ Respond to user messages according to the following principles:
 const (
 	intervalSeconds = 1
 
-	cmdStart = "/start"
-	cmdStats = "/stats"
-	cmdHelp  = "/help"
+	cmdStart   = "/start"
+	cmdStats   = "/stats"
+	cmdHelp    = "/help"
+	cmdPrivacy = "/privacy"
 
 	msgStart                 = "This bot will answer your messages with Gemini API :-)"
 	msgCmdNotSupported       = "Not a supported bot command: %s"
@@ -58,11 +59,15 @@ const (
 	msgHelp                  = `Help message here:
 
 /stats : show stats of this bot.
+/privacy : show privacy policy of this bot.
 /help : show this help message.
 
 - model: %s
 - version: %s
 `
+	msgPrivacy = `Privacy Policy:
+
+https://github.com/meinside/telegram-gemini-bot/raw/master/PRIVACY.md`
 
 	defaultAnswerTimeoutSeconds = 180 // 3 minutes
 )
@@ -284,6 +289,7 @@ func runBot(conf config) {
 		bot.AddCommandHandler(cmdStart, startCommandHandler(conf, allowedUsers))
 		bot.AddCommandHandler(cmdStats, statsCommandHandler(conf, db, allowedUsers))
 		bot.AddCommandHandler(cmdHelp, helpCommandHandler(conf, allowedUsers))
+		bot.AddCommandHandler(cmdPrivacy, privacyCommandHandler(conf))
 		bot.SetNoMatchingCommandHandler(noSuchCommandHandler(conf, allowedUsers))
 
 		// poll updates
