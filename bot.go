@@ -10,17 +10,22 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path"
 	"strings"
 	"time"
 
+	// google ai
 	"github.com/google/generative-ai-go/genai"
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 
-	"github.com/meinside/infisical-go"
-	"github.com/meinside/infisical-go/helper"
+	// infisical
+	infisical "github.com/infisical/go-sdk"
+	"github.com/infisical/go-sdk/packages/models"
+
+	// my libraries
 	tg "github.com/meinside/telegram-bot-go"
 )
 
@@ -114,9 +119,9 @@ type infisicalSetting struct {
 	ClientID     string `json:"client_id"`
 	ClientSecret string `json:"client_secret"`
 
-	WorkspaceID string               `json:"workspace_id"`
-	Environment string               `json:"environment"`
-	SecretType  infisical.SecretType `json:"secret_type"`
+	ProjectID   string `json:"project_id"`
+	Environment string `json:"environment"`
+	SecretType  string `json:"secret_type"`
 
 	TelegramBotTokenKeyPath string `json:"telegram_bot_token_key_path"`
 	GoogleAIAPIKeyKeyPath   string `json:"google_ai_api_key_key_path"`
@@ -128,29 +133,51 @@ func loadConfig(fpath string) (conf config, err error) {
 	if bytes, err = os.ReadFile(fpath); err == nil {
 		if bytes, err = standardizeJSON(bytes); err == nil {
 			if err = json.Unmarshal(bytes, &conf); err == nil {
-				if (conf.TelegramBotToken == nil || conf.GoogleAIAPIKey == nil) && conf.Infisical != nil {
+				if (conf.TelegramBotToken == nil || conf.GoogleAIAPIKey == nil) &&
+					conf.Infisical != nil {
 					// read token and api key from infisical
-					var botToken, apiKey string
+					client := infisical.NewInfisicalClient(infisical.Config{
+						SiteUrl: "https://app.infisical.com",
+					})
 
-					var kvs map[string]string
-					kvs, err = helper.Values(
-						conf.Infisical.ClientID,
-						conf.Infisical.ClientSecret,
-						conf.Infisical.WorkspaceID,
-						conf.Infisical.Environment,
-						conf.Infisical.SecretType,
-						[]string{
-							conf.Infisical.TelegramBotTokenKeyPath,
-							conf.Infisical.GoogleAIAPIKeyKeyPath,
-						},
-					)
-
-					var exists bool
-					if botToken, exists = kvs[conf.Infisical.TelegramBotTokenKeyPath]; exists {
-						conf.TelegramBotToken = &botToken
+					_, err = client.Auth().UniversalAuthLogin(conf.Infisical.ClientID, conf.Infisical.ClientSecret)
+					if err != nil {
+						return config{}, fmt.Errorf("failed to authenticate with Infisical: %s", err)
 					}
-					if apiKey, exists = kvs[conf.Infisical.GoogleAIAPIKeyKeyPath]; exists {
-						conf.GoogleAIAPIKey = &apiKey
+
+					var keyPath string
+					var secret models.Secret
+
+					// telegram bot token
+					keyPath = conf.Infisical.TelegramBotTokenKeyPath
+					secret, err = client.Secrets().Retrieve(infisical.RetrieveSecretOptions{
+						ProjectID:   conf.Infisical.ProjectID,
+						Type:        conf.Infisical.SecretType,
+						Environment: conf.Infisical.Environment,
+						SecretPath:  path.Dir(keyPath),
+						SecretKey:   path.Base(keyPath),
+					})
+					if err == nil {
+						val := secret.SecretValue
+						conf.TelegramBotToken = &val
+					} else {
+						return config{}, fmt.Errorf("failed to retrieve `telegram_bot_token` from Infisical: %s", err)
+					}
+
+					// google ai api key
+					keyPath = conf.Infisical.GoogleAIAPIKeyKeyPath
+					secret, err = client.Secrets().Retrieve(infisical.RetrieveSecretOptions{
+						ProjectID:   conf.Infisical.ProjectID,
+						Type:        conf.Infisical.SecretType,
+						Environment: conf.Infisical.Environment,
+						SecretPath:  path.Dir(keyPath),
+						SecretKey:   path.Base(keyPath),
+					})
+					if err == nil {
+						val := secret.SecretValue
+						conf.GoogleAIAPIKey = &val
+					} else {
+						return config{}, fmt.Errorf("failed to retrieve `google_ai_api_key` from Infisical: %s", err)
 					}
 				}
 
