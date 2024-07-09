@@ -8,13 +8,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 	"path"
 	"strings"
 	"time"
 
 	// google ai
+	"github.com/gabriel-vasile/mimetype"
 	"github.com/google/generative-ai-go/genai"
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
@@ -508,27 +508,21 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 		prompt = append(prompt, genai.Text(original.text))
 
 		// files
+		var mimeType string
 		for _, file := range original.files {
-			mimeType := http.DetectContentType(file)
+			mimeType = stripCharsetFromMimeType(mimetype.Detect(file).String())
 
-			if strings.HasPrefix(mimeType, "image/") { // FIXME: images are working without upload for now
-				prompt = append(prompt, genai.Blob{
-					MIMEType: mimeType,
-					Data:     file,
+			if file, err := client.UploadFile(ctx, "", bytes.NewReader(file), &genai.UploadFileOptions{
+				MIMEType: mimeType,
+			}); err == nil {
+				prompt = append(prompt, genai.FileData{
+					MIMEType: file.MIMEType,
+					URI:      file.URI,
 				})
-			} else {
-				if file, err := client.UploadFile(ctx, "", bytes.NewReader(file), &genai.UploadFileOptions{
-					MIMEType: mimeType,
-				}); err == nil {
-					prompt = append(prompt, genai.FileData{
-						MIMEType: file.MIMEType,
-						URI:      file.URI,
-					})
 
-					fileNames = append(fileNames, file.Name) // FIXME: synchronously wait for it to become active
-				} else {
-					log.Printf("failed to upload file(%s) for prompt: %s", mimeType, redact(conf, err))
-				}
+				fileNames = append(fileNames, file.Name) // FIXME: will wait synchronously for it to become active
+			} else {
+				log.Printf("failed to upload file(%s) for prompt: %s", mimeType, redact(conf, err))
 			}
 		}
 	}
@@ -544,27 +538,21 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 		}
 
 		// files
+		var mimeType string
 		for _, file := range parent.files {
-			mimeType := http.DetectContentType(file)
+			mimeType = stripCharsetFromMimeType(mimetype.Detect(file).String())
 
-			if strings.HasPrefix(mimeType, "image/") { // FIXME: images are working without upload for now
-				parts = append(parts, genai.Blob{
-					MIMEType: mimeType,
-					Data:     file,
+			if file, err := client.UploadFile(ctx, "", bytes.NewReader(file), &genai.UploadFileOptions{
+				MIMEType: mimeType,
+			}); err == nil {
+				parts = append(parts, genai.FileData{
+					MIMEType: file.MIMEType,
+					URI:      file.URI,
 				})
-			} else {
-				if file, err := client.UploadFile(ctx, "", bytes.NewReader(file), &genai.UploadFileOptions{
-					MIMEType: mimeType,
-				}); err == nil {
-					parts = append(parts, genai.FileData{
-						MIMEType: file.MIMEType,
-						URI:      file.URI,
-					})
 
-					fileNames = append(fileNames, file.Name) // FIXME: will wait for it to become active
-				} else {
-					log.Printf("failed to upload file(%s) for history: %s", mimeType, redact(conf, err))
-				}
+				fileNames = append(fileNames, file.Name) // FIXME: will wait synchronously for it to become active
+			} else {
+				log.Printf("failed to upload file(%s) for history: %s", mimeType, redact(conf, err))
 			}
 		}
 
@@ -574,7 +562,7 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 		})
 	}
 
-	// FIXME: wait for all prompt files to become active
+	// FIXME: wait for all files to become active
 	waitForFiles(ctx, conf, client, fileNames)
 
 	// set safety filters
