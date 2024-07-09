@@ -510,7 +510,7 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 		// files
 		var mimeType string
 		for _, file := range original.files {
-			mimeType = mimetype.Detect(file).String()
+			mimeType = stripCharsetFromMimeType(mimetype.Detect(file).String())
 
 			if file, err := client.UploadFile(ctx, "", bytes.NewReader(file), &genai.UploadFileOptions{
 				MIMEType: mimeType,
@@ -540,7 +540,7 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 		// files
 		var mimeType string
 		for _, file := range parent.files {
-			mimeType = mimetype.Detect(file).String()
+			mimeType = stripCharsetFromMimeType(mimetype.Detect(file).String())
 
 			if file, err := client.UploadFile(ctx, "", bytes.NewReader(file), &genai.UploadFileOptions{
 				MIMEType: mimeType,

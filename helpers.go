@@ -140,3 +140,9 @@ func standardizeJSON(b []byte) ([]byte, error) {
 func ptr[T any](v T) *T {
 	return &v
 }
+
+// strip trailing charset text from given mime type
+func stripCharsetFromMimeType(mimeType string) string {
+	splitted := strings.Split(mimeType, ";")
+	return splitted[0]
+}
