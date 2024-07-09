@@ -34,9 +34,9 @@ const (
 	defaultGenerativeModel      = "gemini-1.5-pro-latest"
 	defaultAIHarmBlockThreshold = 3
 
-	defaultSystemInstructionFormat = `You are a Telegram bot which is built with Golang and Google Gemini API(model: %s).
+	defaultSystemInstructionFormat = `You are a Telegram bot which is built with Golang and Google Gemini API(model: %[1]s).
 
-Current datetime is %s.
+Current datetime is %[2]s.
 
 Respond to user messages according to the following principles:
 - Do not repeat the user's request.
@@ -755,7 +755,7 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 // generate a default system instruction with given configuration
 func defaultSystemInstruction(conf config) string {
 	return fmt.Sprintf(defaultSystemInstructionFormat,
-		time.Now().Format("2006-01-02 15:04:05 (Mon)"),
 		*conf.GoogleGenerativeModel,
+		time.Now().Format("2006-01-02 15:04:05 (Mon)"),
 	)
 }
