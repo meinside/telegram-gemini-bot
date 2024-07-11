@@ -8,12 +8,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"path"
+	"regexp"
 	"strings"
 	"time"
 
 	// google ai
+	"github.com/PuerkitoBio/goquery"
 	"github.com/gabriel-vasile/mimetype"
 	"github.com/google/generative-ai-go/genai"
 	"golang.org/x/text/language"
@@ -74,7 +77,14 @@ const (
 
 https://github.com/meinside/telegram-gemini-bot/raw/master/PRIVACY.md`
 
-	defaultAnswerTimeoutSeconds = 180 // 3 minutes
+	defaultAnswerTimeoutSeconds   = 180 // 3 minutes
+	defaultFetchURLTimeoutSeconds = 10  // 10 seconds
+
+	// for replacing URLs in prompt to body texts
+	urlRegexp       = `https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)`
+	urlToTextFormat = `<link url="%[1]s" content-type="%[2]s">
+%[3]s
+</link>`
 )
 
 type chatMessageRole string
@@ -100,11 +110,13 @@ type config struct {
 	GoogleAIHarmBlockThreshold *int `json:"google_ai_harm_block_threshold,omitempty"`
 
 	// configurations
-	AllowedTelegramUsers  []string `json:"allowed_telegram_users"`
-	RequestLogsDBFilepath string   `json:"db_filepath,omitempty"`
-	StreamMessages        bool     `json:"stream_messages,omitempty"`
-	AnswerTimeoutSeconds  int      `json:"answer_timeout_seconds,omitempty"`
-	Verbose               bool     `json:"verbose,omitempty"`
+	AllowedTelegramUsers               []string `json:"allowed_telegram_users"`
+	RequestLogsDBFilepath              string   `json:"db_filepath,omitempty"`
+	StreamMessages                     bool     `json:"stream_messages,omitempty"`
+	AnswerTimeoutSeconds               int      `json:"answer_timeout_seconds,omitempty"`
+	ReplaceHTTPURLsInPromptToBodyTexts bool     `json:"replace_http_urls_in_prompt_to_body_texts,omitempty"`
+	FetchURLTimeoutSeconds             int      `json:"fetch_url_timeout_seconds,omitempty"`
+	Verbose                            bool     `json:"verbose,omitempty"`
 
 	// telegram bot and google api tokens
 	TelegramBotToken *string `json:"telegram_bot_token,omitempty"`
@@ -188,8 +200,11 @@ func loadConfig(fpath string) (conf config, err error) {
 				if conf.GoogleAIHarmBlockThreshold == nil {
 					conf.GoogleAIHarmBlockThreshold = ptr(defaultAIHarmBlockThreshold)
 				}
-				if conf.AnswerTimeoutSeconds == 0 {
+				if conf.AnswerTimeoutSeconds <= 0 {
 					conf.AnswerTimeoutSeconds = defaultAnswerTimeoutSeconds
+				}
+				if conf.FetchURLTimeoutSeconds <= 0 {
+					conf.FetchURLTimeoutSeconds = defaultFetchURLTimeoutSeconds
 				}
 
 				// check the existence of essential values
@@ -499,13 +514,23 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 		},
 	}
 
+	// set safety filters
+	model.SafetySettings = safetySettings(genai.HarmBlockThreshold(*conf.GoogleAIHarmBlockThreshold))
+
 	fileNames := []string{}
 
 	// prompt
 	prompt := []genai.Part{}
 	if original != nil {
 		// text
-		prompt = append(prompt, genai.Text(original.text))
+		text := original.text
+		if conf.ReplaceHTTPURLsInPromptToBodyTexts {
+			text = replaceHTTPURLsInPromptToBodyTexts(conf, text)
+		}
+		if conf.Verbose {
+			log.Printf("[verbose] prompt text: '%s'", text)
+		}
+		prompt = append(prompt, genai.Text(text))
 
 		// files
 		var mimeType string
@@ -564,9 +589,6 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 
 	// FIXME: wait for all files to become active
 	waitForFiles(ctx, conf, client, fileNames)
-
-	// set safety filters
-	model.SafetySettings = safetySettings(genai.HarmBlockThreshold(*conf.GoogleAIHarmBlockThreshold))
 
 	// number of tokens for logging
 	var numTokensInput int32 = 0
@@ -758,4 +780,60 @@ func defaultSystemInstruction(conf config) string {
 		*conf.GoogleGenerativeModel,
 		time.Now().Format("2006-01-02 15:04:05 (Mon)"),
 	)
+}
+
+// replace all http urls in given text to body texts
+func replaceHTTPURLsInPromptToBodyTexts(conf config, prompt string) string {
+	re := regexp.MustCompile(urlRegexp)
+	for _, url := range re.FindAllString(prompt, -1) {
+		if converted, err := urlToText(conf, url); err == nil {
+			prompt = strings.Replace(prompt, url, fmt.Sprintf("%s\n", converted), 1)
+		}
+	}
+
+	return prompt
+}
+
+// fetch the content from given url and convert it to text for prompting.
+func urlToText(conf config, url string) (body string, err error) {
+	client := &http.Client{
+		Timeout: time.Duration(conf.FetchURLTimeoutSeconds) * time.Second,
+	}
+
+	resp, err := client.Get(url)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch contents from url: %s", err)
+	}
+	defer resp.Body.Close()
+
+	contentType := resp.Header.Get("Content-Type")
+
+	if resp.StatusCode != 200 {
+		return fmt.Sprintf(urlToTextFormat, url, contentType, fmt.Sprintf("HTTP Error %d", resp.StatusCode)),
+			fmt.Errorf("http error %d from url: %s", resp.StatusCode, url)
+	}
+
+	if strings.HasPrefix(contentType, "text/html") {
+		var doc *goquery.Document
+		if doc, err = goquery.NewDocumentFromReader(resp.Body); err == nil {
+			_ = doc.Find("script").Remove() // FIXME: remove unwanted javascripts
+
+			body = fmt.Sprintf(urlToTextFormat, url, contentType, removeConsecutiveEmptyLines(doc.Text()))
+		} else {
+			body = fmt.Sprintf(urlToTextFormat, url, contentType, "Failed to read HTML document.")
+			err = fmt.Errorf("failed to read html document from %s: %s", url, err)
+		}
+	} else {
+		body = fmt.Sprintf(urlToTextFormat, url, contentType, fmt.Sprintf("Content type not supported: %s", contentType))
+		err = fmt.Errorf("content type not supported for url %s: %s", url, contentType)
+	}
+
+	return body, err
+}
+
+// remove consecutive empty lines for compacting prompt lines
+func removeConsecutiveEmptyLines(input string) string {
+	regex := regexp.MustCompile("\\s+\n{2,}")
+
+	return regex.ReplaceAllString(input, "\n")
 }
