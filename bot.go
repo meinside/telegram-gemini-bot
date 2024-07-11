@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -808,24 +809,32 @@ func urlToText(conf config, url string) (body string, err error) {
 
 	contentType := resp.Header.Get("Content-Type")
 
-	if resp.StatusCode != 200 {
-		return fmt.Sprintf(urlToTextFormat, url, contentType, fmt.Sprintf("HTTP Error %d", resp.StatusCode)),
-			fmt.Errorf("http error %d from url: %s", resp.StatusCode, url)
-	}
+	if resp.StatusCode == 200 {
+		if strings.HasPrefix(contentType, "text/html") {
+			var doc *goquery.Document
+			if doc, err = goquery.NewDocumentFromReader(resp.Body); err == nil {
+				_ = doc.Find("script").Remove() // FIXME: remove unwanted javascripts
 
-	if strings.HasPrefix(contentType, "text/html") {
-		var doc *goquery.Document
-		if doc, err = goquery.NewDocumentFromReader(resp.Body); err == nil {
-			_ = doc.Find("script").Remove() // FIXME: remove unwanted javascripts
-
-			body = fmt.Sprintf(urlToTextFormat, url, contentType, removeConsecutiveEmptyLines(doc.Text()))
+				body = fmt.Sprintf(urlToTextFormat, url, contentType, removeConsecutiveEmptyLines(doc.Text()))
+			} else {
+				body = fmt.Sprintf(urlToTextFormat, url, contentType, "Failed to read this HTML document.")
+				err = fmt.Errorf("failed to read html document from %s: %s", url, err)
+			}
+		} else if strings.HasPrefix(contentType, "text/") {
+			var bytes []byte
+			if bytes, err = io.ReadAll(resp.Body); err == nil {
+				body = fmt.Sprintf(urlToTextFormat, url, contentType, removeConsecutiveEmptyLines(string(bytes)))
+			} else {
+				body = fmt.Sprintf(urlToTextFormat, url, contentType, "Failed to read this document.")
+				err = fmt.Errorf("failed to read %s document from %s: %s", contentType, url, err)
+			}
 		} else {
-			body = fmt.Sprintf(urlToTextFormat, url, contentType, "Failed to read HTML document.")
-			err = fmt.Errorf("failed to read html document from %s: %s", url, err)
+			body = fmt.Sprintf(urlToTextFormat, url, contentType, fmt.Sprintf("Content type: %s not supported.", contentType))
+			err = fmt.Errorf("content type %s not supported for url: %s", contentType, url)
 		}
 	} else {
-		body = fmt.Sprintf(urlToTextFormat, url, contentType, fmt.Sprintf("Content type not supported: %s", contentType))
-		err = fmt.Errorf("content type not supported for url %s: %s", url, contentType)
+		body = fmt.Sprintf(urlToTextFormat, url, contentType, fmt.Sprintf("HTTP Error %d", resp.StatusCode))
+		err = fmt.Errorf("http error %d from url: %s", resp.StatusCode, url)
 	}
 
 	return body, err
@@ -833,7 +842,14 @@ func urlToText(conf config, url string) (body string, err error) {
 
 // remove consecutive empty lines for compacting prompt lines
 func removeConsecutiveEmptyLines(input string) string {
-	regex := regexp.MustCompile("\\s+\n{2,}")
+	// trim each line
+	trimmed := []string{}
+	for _, line := range strings.Split(input, "\n") {
+		trimmed = append(trimmed, strings.TrimRight(line, " "))
+	}
+	input = strings.Join(trimmed, "\n")
 
+	// remove redundant empty lines
+	regex := regexp.MustCompile("\\s+\n{2,}")
 	return regex.ReplaceAllString(input, "\n")
 }
