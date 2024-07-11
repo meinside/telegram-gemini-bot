@@ -51,6 +51,7 @@ and set your values:
   "db_filepath": null,
   "stream_messages": false,
   "answer_timeout_seconds": 180,
+  "replace_http_urls_in_prompt_to_body_texts": false,
   "verbose": false,
 
   "telegram_bot_token": "123456:abcdefghijklmnop-QRSTUVWXYZ7890",
@@ -74,6 +75,8 @@ You can use [Infisical](https://infisical.com/) for saving & retrieving your bot
   "allowed_telegram_users": ["user1", "user2"],
   "db_filepath": null,
   "stream_messages": false,
+  "answer_timeout_seconds": 180,
+  "replace_http_urls_in_prompt_to_body_texts": false,
   "verbose": false,
 
   "infisical": {
@@ -144,6 +147,7 @@ and `systemctl` enable|start|restart|stop the service.
   - Will add reactions on successfully received or generated messages.
 - [X] Process media files properly.
 - [X] Handle inline queries. (Will show last 5 prompts & results requested by the user)
+- [X] Add an option to fetch the content of HTTP URLs in the prompt, and replace them with the fetched content. (Gemini handles URLs automatically sometimes, but not always.)
 - [ ] Handle markdown texts gracefully.
 
 ## License
