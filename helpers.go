@@ -120,6 +120,9 @@ func helpMessage(conf config) string {
 	return fmt.Sprintf(msgHelp,
 		*conf.GoogleGenerativeModel,
 		version.Build(version.OS|version.Architecture|version.Revision),
+		cmdStats, descStats,
+		cmdPrivacy, descPrivacy,
+		cmdHelp, descHelp,
 	)
 }
 
