@@ -7,23 +7,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
-	"net/http"
 	"os"
 	"path"
-	"regexp"
 	"strings"
 	"time"
 
 	// google ai
-	"github.com/PuerkitoBio/goquery"
-	"github.com/gabriel-vasile/mimetype"
 	"github.com/google/generative-ai-go/genai"
-	"golang.org/x/text/language"
-	"golang.org/x/text/message"
-	"google.golang.org/api/iterator"
-	"google.golang.org/api/option"
 
 	// infisical
 	infisical "github.com/infisical/go-sdk"
@@ -31,6 +22,13 @@ import (
 
 	// my libraries
 	tg "github.com/meinside/telegram-bot-go"
+
+	// others
+	"github.com/gabriel-vasile/mimetype"
+	"golang.org/x/text/language"
+	"golang.org/x/text/message"
+	"google.golang.org/api/iterator"
+	"google.golang.org/api/option"
 )
 
 // constants for default values
@@ -781,75 +779,4 @@ func defaultSystemInstruction(conf config) string {
 		*conf.GoogleGenerativeModel,
 		time.Now().Format("2006-01-02 15:04:05 (Mon)"),
 	)
-}
-
-// replace all http urls in given text to body texts
-func replaceHTTPURLsInPromptToBodyTexts(conf config, prompt string) string {
-	re := regexp.MustCompile(urlRegexp)
-	for _, url := range re.FindAllString(prompt, -1) {
-		if converted, err := urlToText(conf, url); err == nil {
-			prompt = strings.Replace(prompt, url, fmt.Sprintf("%s\n", converted), 1)
-		}
-	}
-
-	return prompt
-}
-
-// fetch the content from given url and convert it to text for prompting.
-func urlToText(conf config, url string) (body string, err error) {
-	client := &http.Client{
-		Timeout: time.Duration(conf.FetchURLTimeoutSeconds) * time.Second,
-	}
-
-	resp, err := client.Get(url)
-	if err != nil {
-		return "", fmt.Errorf("failed to fetch contents from url: %s", err)
-	}
-	defer resp.Body.Close()
-
-	contentType := resp.Header.Get("Content-Type")
-
-	if resp.StatusCode == 200 {
-		if strings.HasPrefix(contentType, "text/html") {
-			var doc *goquery.Document
-			if doc, err = goquery.NewDocumentFromReader(resp.Body); err == nil {
-				_ = doc.Find("script").Remove() // FIXME: remove unwanted javascripts
-
-				body = fmt.Sprintf(urlToTextFormat, url, contentType, removeConsecutiveEmptyLines(doc.Text()))
-			} else {
-				body = fmt.Sprintf(urlToTextFormat, url, contentType, "Failed to read this HTML document.")
-				err = fmt.Errorf("failed to read html document from %s: %s", url, err)
-			}
-		} else if strings.HasPrefix(contentType, "text/") {
-			var bytes []byte
-			if bytes, err = io.ReadAll(resp.Body); err == nil {
-				body = fmt.Sprintf(urlToTextFormat, url, contentType, removeConsecutiveEmptyLines(string(bytes)))
-			} else {
-				body = fmt.Sprintf(urlToTextFormat, url, contentType, "Failed to read this document.")
-				err = fmt.Errorf("failed to read %s document from %s: %s", contentType, url, err)
-			}
-		} else {
-			body = fmt.Sprintf(urlToTextFormat, url, contentType, fmt.Sprintf("Content type: %s not supported.", contentType))
-			err = fmt.Errorf("content type %s not supported for url: %s", contentType, url)
-		}
-	} else {
-		body = fmt.Sprintf(urlToTextFormat, url, contentType, fmt.Sprintf("HTTP Error %d", resp.StatusCode))
-		err = fmt.Errorf("http error %d from url: %s", resp.StatusCode, url)
-	}
-
-	return body, err
-}
-
-// remove consecutive empty lines for compacting prompt lines
-func removeConsecutiveEmptyLines(input string) string {
-	// trim each line
-	trimmed := []string{}
-	for _, line := range strings.Split(input, "\n") {
-		trimmed = append(trimmed, strings.TrimRight(line, " "))
-	}
-	input = strings.Join(trimmed, "\n")
-
-	// remove redundant empty lines
-	regex := regexp.MustCompile("\\s+\n{2,}")
-	return regex.ReplaceAllString(input, "\n")
 }

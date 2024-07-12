@@ -14,7 +14,10 @@ import (
 	"sync"
 	"time"
 
+	// google ai
 	"github.com/google/generative-ai-go/genai"
+
+	// my libraries
 	tg "github.com/meinside/telegram-bot-go"
 )
 
