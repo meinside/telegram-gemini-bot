@@ -55,8 +55,12 @@ const (
 
 	cmdStart   = "/start"
 	cmdStats   = "/stats"
-	cmdHelp    = "/help"
 	cmdPrivacy = "/privacy"
+	cmdHelp    = "/help"
+
+	descStats   = "show stats of this bot."
+	descPrivacy = "show privacy policy of this bot."
+	descHelp    = "show help message."
 
 	msgStart                 = "This bot will answer your messages with Gemini API :-)"
 	msgCmdNotSupported       = "Not a supported bot command: %s"
@@ -65,12 +69,12 @@ const (
 	msgDatabaseEmpty         = "Database is empty."
 	msgHelp                  = `Help message here:
 
-/stats : show stats of this bot.
-/privacy : show privacy policy of this bot.
-/help : show this help message.
+%[3]s : %[4]s
+%[5]s : %[6]s
+%[7]s : %[8]s
 
-- model: %s
-- version: %s
+- model: %[1]s
+- version: %[2]s
 `
 	msgPrivacy = `Privacy Policy:
 
@@ -332,6 +336,24 @@ func runBot(conf config) {
 		bot.AddCommandHandler(cmdHelp, helpCommandHandler(conf, allowedUsers))
 		bot.AddCommandHandler(cmdPrivacy, privacyCommandHandler(conf))
 		bot.SetNoMatchingCommandHandler(noSuchCommandHandler(conf, allowedUsers))
+
+		// set bot commands
+		if res := bot.SetMyCommands([]tg.BotCommand{
+			{
+				Command:     cmdStats,
+				Description: descStats,
+			},
+			{
+				Command:     cmdPrivacy,
+				Description: descPrivacy,
+			},
+			{
+				Command:     cmdHelp,
+				Description: descHelp,
+			},
+		}, tg.OptionsSetMyCommands{}); !res.Ok {
+			log.Printf("failed to set bot commands: %s", *res.Description)
+		}
 
 		// poll updates
 		bot.StartPollingUpdates(0, intervalSeconds, func(b *tg.Bot, update tg.Update, err error) {
