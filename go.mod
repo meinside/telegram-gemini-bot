@@ -6,7 +6,7 @@ require (
 	github.com/PuerkitoBio/goquery v1.9.2
 	github.com/gabriel-vasile/mimetype v1.4.4
 	github.com/google/generative-ai-go v0.16.0
-	github.com/infisical/go-sdk v0.2.1
+	github.com/infisical/go-sdk v0.3.2
 	github.com/meinside/telegram-bot-go v0.11.4
 	github.com/meinside/version-go v0.0.3
 	github.com/tailscale/hujson v0.0.0-20221223112325-20486734a56a
