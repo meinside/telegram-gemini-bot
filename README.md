@@ -51,7 +51,7 @@ and set your values:
   "db_filepath": null,
   "stream_messages": false,
   "answer_timeout_seconds": 180,
-  "replace_http_urls_in_prompt_to_body_texts": false,
+  "replace_http_urls_in_prompt": false,
   "verbose": false,
 
   "telegram_bot_token": "123456:abcdefghijklmnop-QRSTUVWXYZ7890",
@@ -76,7 +76,7 @@ You can use [Infisical](https://infisical.com/) for saving & retrieving your bot
   "db_filepath": null,
   "stream_messages": false,
   "answer_timeout_seconds": 180,
-  "replace_http_urls_in_prompt_to_body_texts": false,
+  "replace_http_urls_in_prompt": false,
   "verbose": false,
 
   "infisical": {

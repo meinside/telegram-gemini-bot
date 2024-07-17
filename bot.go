@@ -113,13 +113,13 @@ type config struct {
 	GoogleAIHarmBlockThreshold *int `json:"google_ai_harm_block_threshold,omitempty"`
 
 	// configurations
-	AllowedTelegramUsers               []string `json:"allowed_telegram_users"`
-	RequestLogsDBFilepath              string   `json:"db_filepath,omitempty"`
-	StreamMessages                     bool     `json:"stream_messages,omitempty"`
-	AnswerTimeoutSeconds               int      `json:"answer_timeout_seconds,omitempty"`
-	ReplaceHTTPURLsInPromptToBodyTexts bool     `json:"replace_http_urls_in_prompt_to_body_texts,omitempty"`
-	FetchURLTimeoutSeconds             int      `json:"fetch_url_timeout_seconds,omitempty"`
-	Verbose                            bool     `json:"verbose,omitempty"`
+	AllowedTelegramUsers    []string `json:"allowed_telegram_users"`
+	RequestLogsDBFilepath   string   `json:"db_filepath,omitempty"`
+	StreamMessages          bool     `json:"stream_messages,omitempty"`
+	AnswerTimeoutSeconds    int      `json:"answer_timeout_seconds,omitempty"`
+	ReplaceHTTPURLsInPrompt bool     `json:"replace_http_urls_in_prompt,omitempty"`
+	FetchURLTimeoutSeconds  int      `json:"fetch_url_timeout_seconds,omitempty"`
+	Verbose                 bool     `json:"verbose,omitempty"`
 
 	// telegram bot and google api tokens
 	TelegramBotToken *string `json:"telegram_bot_token,omitempty"`
@@ -545,7 +545,7 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 	if original != nil {
 		// text
 		text := original.text
-		if conf.ReplaceHTTPURLsInPromptToBodyTexts {
+		if conf.ReplaceHTTPURLsInPrompt {
 			text = replaceHTTPURLsInPromptToBodyTexts(conf, text)
 		}
 		if conf.Verbose {
