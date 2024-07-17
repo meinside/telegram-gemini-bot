@@ -190,7 +190,10 @@ func urlToText(conf config, url string) (body string, err error) {
 		if strings.HasPrefix(contentType, "text/html") {
 			var doc *goquery.Document
 			if doc, err = goquery.NewDocumentFromReader(resp.Body); err == nil {
-				_ = doc.Find("script").Remove() // FIXME: remove unwanted javascripts
+				// NOTE: removing unwanted things from HTML
+				_ = doc.Find("script").Remove()                   // javascripts
+				_ = doc.Find("link[rel=\"stylesheet\"]").Remove() // css links
+				_ = doc.Find("style").Remove()                    // embeded css styles
 
 				body = fmt.Sprintf(urlToTextFormat, url, contentType, removeConsecutiveEmptyLines(doc.Text()))
 			} else {
