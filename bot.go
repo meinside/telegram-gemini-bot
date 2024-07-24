@@ -639,8 +639,12 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 					candidate = it.Candidates[0]
 					content = candidate.Content
 
-					if len(content.Parts) > 0 {
+					if content != nil && len(content.Parts) > 0 {
 						parts = content.Parts
+					} else if candidate.FinishReason > 0 {
+						parts = []genai.Part{genai.Text("<<<" + candidate.FinishReason.String() + ">>>")}
+					} else {
+						parts = []genai.Part{genai.Text("<<<no content in candidate>>>")}
 					}
 				}
 
@@ -710,8 +714,10 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 				candidate = generated.Candidates[0]
 				content = candidate.Content
 
-				if len(content.Parts) > 0 {
+				if content != nil && len(content.Parts) > 0 {
 					parts = content.Parts
+				} else if candidate.FinishReason > 0 {
+					parts = []genai.Part{genai.Text("Response finished with reason: " + candidate.FinishReason.String())}
 				} else {
 					parts = []genai.Part{genai.Text("There was no part in the generated candidate's content.")}
 				}
