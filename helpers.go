@@ -26,6 +26,8 @@ import (
 )
 
 const (
+	httpUserAgent = `TGB/url2text`
+
 	redactedString = "<REDACTED>"
 )
 
@@ -178,7 +180,13 @@ func urlToText(conf config, url string) (body string, err error) {
 		Timeout: time.Duration(conf.FetchURLTimeoutSeconds) * time.Second,
 	}
 
-	resp, err := client.Get(url)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create http request: %s", err)
+	}
+	req.Header.Set("User-Agent", httpUserAgent)
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch contents from url: %s", err)
 	}
