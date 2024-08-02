@@ -7,11 +7,11 @@ require (
 	github.com/gabriel-vasile/mimetype v1.4.5
 	github.com/google/generative-ai-go v0.17.0
 	github.com/infisical/go-sdk v0.3.3
-	github.com/meinside/telegram-bot-go v0.11.4
+	github.com/meinside/telegram-bot-go v0.11.5
 	github.com/meinside/version-go v0.0.3
 	github.com/tailscale/hujson v0.0.0-20221223112325-20486734a56a
 	golang.org/x/text v0.16.0
-	google.golang.org/api v0.189.0
+	google.golang.org/api v0.190.0
 	gorm.io/driver/sqlite v1.5.6
 	gorm.io/gorm v1.25.11
 )
@@ -19,7 +19,7 @@ require (
 require (
 	cloud.google.com/go v0.115.0 // indirect
 	cloud.google.com/go/ai v0.8.2 // indirect
-	cloud.google.com/go/auth v0.7.2 // indirect
+	cloud.google.com/go/auth v0.7.3 // indirect
 	cloud.google.com/go/auth/oauth2adapt v0.2.3 // indirect
 	cloud.google.com/go/compute/metadata v0.5.0 // indirect
 	cloud.google.com/go/iam v1.1.12 // indirect
@@ -62,8 +62,8 @@ require (
 	golang.org/x/sync v0.7.0 // indirect
 	golang.org/x/sys v0.22.0 // indirect
 	golang.org/x/time v0.5.0 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20240725223205-93522f1f2a9f // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20240725223205-93522f1f2a9f // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20240730163845-b1a4ccb954bf // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20240730163845-b1a4ccb954bf // indirect
 	google.golang.org/grpc v1.65.0 // indirect
 	google.golang.org/protobuf v1.34.2 // indirect
 )
