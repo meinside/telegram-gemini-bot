@@ -543,19 +543,23 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 	// prompt
 	prompt := []genai.Part{}
 	if original != nil {
+		files := [][]byte{}
+
 		// text
 		text := original.text
 		if conf.ReplaceHTTPURLsInPrompt {
-			text = replaceHTTPURLsInPromptToBodyTexts(conf, text)
-		}
-		if conf.Verbose {
-			log.Printf("[verbose] prompt text: '%s'", text)
+			text, files = convertPromptWithURLs(conf, text)
 		}
 		prompt = append(prompt, genai.Text(text))
 
+		if conf.Verbose {
+			log.Printf("[verbose] prompt text: '%s'", text)
+		}
+
 		// files
 		var mimeType string
-		for _, file := range original.files {
+		files = append(files, original.files...)
+		for _, file := range files {
 			mimeType = stripCharsetFromMimeType(mimetype.Detect(file).String())
 
 			if file, err := client.UploadFile(ctx, "", bytes.NewReader(file), &genai.UploadFileOptions{
