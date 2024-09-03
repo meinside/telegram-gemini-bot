@@ -807,6 +807,6 @@ func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config,
 func defaultSystemInstruction(conf config) string {
 	return fmt.Sprintf(defaultSystemInstructionFormat,
 		*conf.GoogleGenerativeModel,
-		time.Now().Format("2006-01-02 15:04:05 (Mon)"),
+		time.Now().Format("2006-01-02 15:04:05 MST (Mon)"),
 	)
 }
