@@ -19,7 +19,7 @@ A telegram bot which answers to messages with [Gemini API](https://ai.google.dev
 
 ---
 
-* With streaming option on, generated text will be received part by part:
+* Generated text will be received part by part with streaming support:
 
 ![streamed message](https://github.com/meinside/telegram-gemini-bot/assets/185988/05dda043-8b3f-4fd9-8be0-9c0f5e8076a3)
 
@@ -49,7 +49,6 @@ and set your values:
 
   "allowed_telegram_users": ["user1", "user2"],
   "db_filepath": null,
-  "stream_messages": false,
   "answer_timeout_seconds": 180,
   "replace_http_urls_in_prompt": false,
   "verbose": false,
@@ -74,7 +73,6 @@ You can use [Infisical](https://infisical.com/) for saving & retrieving your bot
 
   "allowed_telegram_users": ["user1", "user2"],
   "db_filepath": null,
-  "stream_messages": false,
   "answer_timeout_seconds": 180,
   "replace_http_urls_in_prompt": false,
   "verbose": false,
@@ -139,13 +137,6 @@ and `systemctl` enable|start|restart|stop the service.
 
 ## Todos / Known Issues
 
-- [X] Handle returning messages' size limit (Telegram Bot API's limit: [4096 chars](https://core.telegram.org/bots/api#sendmessage))
-  - Will send a plain-text document instead of an ordinary text message. (Won't work when the `stream_messages` option is true)
-- [X] Add an option for enabling message streaming.
-  - Will update message texts with streamed messages.
-- [X] Add ways of informing users about the status of background processes.
-  - Will add reactions on successfully received or generated messages.
-- [X] Process media files properly.
 - [X] Handle inline queries. (Will show last 5 prompts & results requested by the user)
 - [X] Add an option to fetch the content of HTTP URLs in the prompt, and replace them with the fetched content. (Gemini handles URLs automatically sometimes, but not always.)
 - [ ] Handle markdown texts gracefully.

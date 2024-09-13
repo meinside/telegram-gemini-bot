@@ -5,13 +5,11 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	// google ai
@@ -124,40 +122,6 @@ func noSuchCommandHandler(conf config, allowedUsers map[string]bool) func(b *tg.
 		messageID := message.MessageID
 
 		_, _ = sendMessage(b, conf, fmt.Sprintf(msgCmdNotSupported, cmd), chatID, &messageID)
-	}
-}
-
-// wait for all files to be active
-func waitForFiles(ctx context.Context, conf config, client *genai.Client, fileNames []string) {
-	if conf.Verbose {
-		log.Printf("[verbose] will wait for %d file(s) to become active", len(fileNames))
-	}
-
-	var wg sync.WaitGroup
-	for _, fileName := range fileNames {
-		wg.Add(1)
-
-		go func(name string) {
-			for {
-				if file, err := client.GetFile(ctx, name); err == nil {
-					if file.State == genai.FileStateActive {
-						wg.Done()
-						break
-					} else {
-						time.Sleep(uploadedFileStateCheckIntervalMilliseconds * time.Millisecond)
-					}
-				} else {
-					log.Printf("failed to get file: %s", err)
-
-					time.Sleep(uploadedFileStateCheckIntervalMilliseconds * time.Millisecond)
-				}
-			}
-		}(fileName)
-	}
-	wg.Wait()
-
-	if conf.Verbose {
-		log.Printf("[verbose] %d file(s) now active", len(fileNames))
 	}
 }
 
