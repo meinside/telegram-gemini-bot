@@ -1,10 +1,9 @@
 {
-  "google_generative_model": "gemini-1.5-pro-latest",
+  "google_generative_model": "gemini-1.5-flash-latest",
   "google_ai_harm_block_threshold": 3,
 
   "allowed_telegram_users": ["user1", "user2"],
   "db_filepath": null,
-  "stream_messages": false,
   "answer_timeout_seconds": 180,
   "replace_http_urls_in_prompt": false,
   "verbose": false,

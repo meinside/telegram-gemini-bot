@@ -7,10 +7,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path"
-	"strings"
 	"time"
 
 	// google ai
@@ -21,19 +21,18 @@ import (
 	"github.com/infisical/go-sdk/packages/models"
 
 	// my libraries
+	gt "github.com/meinside/gemini-things-go"
 	tg "github.com/meinside/telegram-bot-go"
 
 	// others
-	"github.com/gabriel-vasile/mimetype"
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
-	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 )
 
 // constants for default values
 const (
-	defaultGenerativeModel      = "gemini-1.5-pro-latest"
+	defaultGenerativeModel      = "gemini-1.5-flash-latest"
 	defaultAIHarmBlockThreshold = 3
 
 	defaultSystemInstructionFormat = `You are a Telegram bot which uses Google Gemini API(model: %[1]s).
@@ -113,7 +112,6 @@ type config struct {
 	// configurations
 	AllowedTelegramUsers    []string `json:"allowed_telegram_users"`
 	RequestLogsDBFilepath   string   `json:"db_filepath,omitempty"`
-	StreamMessages          bool     `json:"stream_messages,omitempty"`
 	AnswerTimeoutSeconds    int      `json:"answer_timeout_seconds,omitempty"`
 	ReplaceHTTPURLsInPrompt bool     `json:"replace_http_urls_in_prompt,omitempty"`
 	FetchURLTimeoutSeconds  int      `json:"fetch_url_timeout_seconds,omitempty"`
@@ -222,7 +220,6 @@ func loadConfig(fpath string) (conf config, err error) {
 // launch bot with given parameters
 func runBot(conf config) {
 	token := conf.TelegramBotToken
-	apiKey := conf.GoogleAIAPIKey
 
 	allowedUsers := map[string]bool{}
 	for _, user := range conf.AllowedTelegramUsers {
@@ -232,35 +229,10 @@ func runBot(conf config) {
 	bot := tg.NewClient(*token)
 
 	ctx := context.Background()
-	client, err := genai.NewClient(ctx, option.WithAPIKey(*apiKey))
-	if err != nil {
-		log.Printf("failed to create API client: %s", redact(conf, err))
-
-		os.Exit(1)
-	}
-	defer client.Close()
 
 	_ = bot.DeleteWebhook(false) // delete webhook before polling updates
 	if b := bot.GetMe(); b.Ok {
 		log.Printf("launching bot: %s", userName(b.Result))
-
-		// clear things
-		if files := client.ListFiles(ctx); files != nil {
-			for {
-				if file, err := files.Next(); err == nil {
-					if err := client.DeleteFile(ctx, file.Name); err != nil {
-						log.Printf("failed to delete cloud file: %s", err)
-					}
-				} else {
-					if err == iterator.Done {
-						break
-					}
-					log.Printf("failed to iterate cloud files: %s", err)
-				}
-			}
-		} else {
-			log.Printf("failed to list files for deletion")
-		}
 
 		// database
 		var db *Database = nil
@@ -278,7 +250,7 @@ func runBot(conf config) {
 				return
 			}
 
-			handleMessages(ctx, b, client, conf, db, []tg.Update{update}, nil)
+			handleMessages(ctx, b, conf, db, []tg.Update{update}, nil)
 		})
 		bot.SetMediaGroupHandler(func(b *tg.Bot, updates []tg.Update, mediaGroupID string) {
 			for _, update := range updates {
@@ -288,7 +260,7 @@ func runBot(conf config) {
 				}
 			}
 
-			handleMessages(ctx, b, client, conf, db, updates, &mediaGroupID)
+			handleMessages(ctx, b, conf, db, updates, &mediaGroupID)
 		})
 		bot.SetInlineQueryHandler(func(b *tg.Bot, update tg.Update, inlineQuery tg.InlineQuery) {
 			options := tg.OptionsAnswerInlineQuery{}.
@@ -376,7 +348,7 @@ func runBot(conf config) {
 }
 
 // handle allowed message updates from telegram bot api
-func handleMessages(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config, db *Database, updates []tg.Update, mediaGroupID *string) {
+func handleMessages(ctx context.Context, bot *tg.Bot, conf config, db *Database, updates []tg.Update, mediaGroupID *string) {
 	if len(updates) <= 0 {
 		if mediaGroupID == nil {
 			log.Printf("failed to handle messages: no updates given")
@@ -415,7 +387,7 @@ func handleMessages(ctx context.Context, bot *tg.Bot, client *genai.Client, conf
 				ctx, cancel := context.WithTimeout(ctx, time.Duration(conf.AnswerTimeoutSeconds)*time.Second)
 				defer cancel()
 
-				answer(ctx, bot, client, conf, db, parent, original, chatID, userID, userNameFromUpdate(update), messageID)
+				answer(ctx, bot, conf, db, parent, original, chatID, userID, userNameFromUpdate(update), messageID)
 
 				if err = ctx.Err(); err == nil {
 					return
@@ -512,295 +484,166 @@ func sendFile(bot *tg.Bot, conf config, data []byte, chatID int64, messageID *in
 }
 
 // generate an answer to given message and send it to the chat
-func answer(ctx context.Context, bot *tg.Bot, client *genai.Client, conf config, db *Database, parent, original *chatMessage, chatID, userID int64, username string, messageID int64) {
+func answer(ctx context.Context, bot *tg.Bot, conf config, db *Database, parent, original *chatMessage, chatID, userID int64, username string, messageID int64) {
 	// leave a reaction on the original message for confirmation
 	_ = bot.SetMessageReaction(chatID, messageID, tg.NewMessageReactionWithEmoji("👌"))
 
-	// model
-	model := client.GenerativeModel(*conf.GoogleGenerativeModel)
+	gtc := gt.NewClient(*conf.GoogleGenerativeModel, *conf.GoogleAIAPIKey)
 
 	// set system instruction
-	var systemInstruction string
-	if conf.SystemInstruction == nil {
-		systemInstruction = defaultSystemInstruction(conf)
-	} else {
-		systemInstruction = *conf.SystemInstruction
-	}
-	model.SystemInstruction = &genai.Content{
-		Role: string(chatMessageRoleModel),
-		Parts: []genai.Part{
-			genai.Text(systemInstruction),
-		},
-	}
+	gtc.SetSystemInstructionFunc(func() string {
+		if conf.SystemInstruction == nil {
+			return defaultSystemInstruction(conf)
+		} else {
+			return *conf.SystemInstruction
+		}
+	})
 
-	// set safety filters
-	model.SafetySettings = safetySettings(genai.HarmBlockThreshold(*conf.GoogleAIHarmBlockThreshold))
-
-	fileNames := []string{}
+	opts := &gt.GenerationOptions{}
 
 	// prompt
-	prompt := []genai.Part{}
+	var promptText string
+	promptFiles := []io.Reader{}
 	if original != nil {
-		files := [][]byte{}
-
 		// text
-		text := original.text
+		promptText = original.text
+		promptFilesFromURL := [][]byte{}
 		if conf.ReplaceHTTPURLsInPrompt {
-			text, files = convertPromptWithURLs(conf, text)
+			promptText, promptFilesFromURL = convertPromptWithURLs(conf, promptText)
 		}
-		prompt = append(prompt, genai.Text(text))
+
+		// files
+		for _, file := range promptFilesFromURL {
+			promptFiles = append(promptFiles, bytes.NewReader(file))
+		}
+		for _, file := range original.files {
+			promptFiles = append(promptFiles, bytes.NewReader(file))
+		}
 
 		if conf.Verbose {
-			log.Printf("[verbose] prompt text: '%s'", text)
-		}
-
-		// files
-		var mimeType string
-		files = append(files, original.files...)
-		for _, file := range files {
-			mimeType = stripCharsetFromMimeType(mimetype.Detect(file).String())
-
-			if file, err := client.UploadFile(ctx, "", bytes.NewReader(file), &genai.UploadFileOptions{
-				MIMEType: mimeType,
-			}); err == nil {
-				prompt = append(prompt, genai.FileData{
-					MIMEType: file.MIMEType,
-					URI:      file.URI,
-				})
-
-				fileNames = append(fileNames, file.Name) // FIXME: will wait synchronously for it to become active
-			} else {
-				log.Printf("failed to upload file(%s) for prompt: %s", mimeType, redact(conf, err))
-			}
+			log.Printf("[verbose] will process prompt text '%s' with %d files", promptText, len(promptFiles))
 		}
 	}
 
-	// set history
-	session := model.StartChat()
+	// histories
 	if parent != nil {
-		session.History = []*genai.Content{}
-
 		// text
+		parentText := parent.text
 		parts := []genai.Part{
-			genai.Text(parent.text),
+			genai.Text(parentText),
 		}
 
-		// files
-		var mimeType string
+		// parentFiles
+		parentFiles := []io.Reader{}
 		for _, file := range parent.files {
-			mimeType = stripCharsetFromMimeType(mimetype.Detect(file).String())
+			parentFiles = append(parentFiles, bytes.NewReader(file))
+		}
+		client, err := genai.NewClient(ctx, option.WithAPIKey(*conf.GoogleAIAPIKey))
+		if err == nil {
+			defer client.Close()
 
-			if file, err := client.UploadFile(ctx, "", bytes.NewReader(file), &genai.UploadFileOptions{
-				MIMEType: mimeType,
-			}); err == nil {
-				parts = append(parts, genai.FileData{
-					MIMEType: file.MIMEType,
-					URI:      file.URI,
-				})
-
-				fileNames = append(fileNames, file.Name) // FIXME: will wait synchronously for it to become active
-			} else {
-				log.Printf("failed to upload file(%s) for history: %s", mimeType, redact(conf, err))
+			// upload files and wait
+			if uploaded, err := gt.UploadFilesAndWait(ctx, client, parentFiles); err == nil {
+				for _, upload := range uploaded {
+					parts = append(parts, upload)
+				}
 			}
 		}
 
-		session.History = append(session.History, &genai.Content{
-			Role:  string(chatMessageRoleModel),
-			Parts: parts,
-		})
+		// set history for generation options
+		opts.History = []*genai.Content{
+			{
+				Role:  string(chatMessageRoleModel),
+				Parts: parts,
+			},
+		}
 	}
-
-	// FIXME: wait for all files to become active
-	waitForFiles(ctx, conf, client, fileNames)
 
 	// number of tokens for logging
 	var numTokensInput int32 = 0
 	var numTokensOutput int32 = 0
 
-	if conf.StreamMessages { // stream message
-		iter := session.SendMessageStream(ctx, prompt...)
+	// generate
+	var firstMessageID *int64 = nil
+	mergedText := ""
+	if err := gtc.GenerateStreamed(
+		ctx,
+		promptText,
+		promptFiles,
+		func(data gt.StreamCallbackData) {
+			if conf.Verbose {
+				log.Printf("[verbose] streaming answer to chat(%d): %+v", chatID, data)
+			}
 
+			if data.TextDelta != nil {
+				generatedText := *data.TextDelta
+				mergedText += generatedText
+
+				if firstMessageID == nil { // send the first message
+					if sentMessageID, err := sendMessage(bot, conf, generatedText, chatID, &messageID); err == nil {
+						firstMessageID = &sentMessageID
+					} else {
+						log.Printf("failed to send stream messages [%+v + %+v] with '%+v': %s", parent, original, data, redact(conf, err))
+					}
+				} else { // update the first message
+					// update the first message (append text)
+					if err := updateMessage(bot, conf, mergedText, chatID, *firstMessageID); err != nil {
+						log.Printf("failed to update stream messages [%+v + %+v] with '%+v': %s", parent, original, data, redact(conf, err))
+					}
+				}
+			} else if data.FinishReason != nil {
+				generatedText := fmt.Sprintf("<<<%s>>>", data.FinishReason.String())
+				mergedText += generatedText
+
+				if firstMessageID == nil { // send the first message
+					if sentMessageID, err := sendMessage(bot, conf, generatedText, chatID, &messageID); err == nil {
+						firstMessageID = &sentMessageID
+					} else {
+						log.Printf("failed to send stream messages [%+v + %+v] with '%+v': %s", parent, original, data, redact(conf, err))
+					}
+				} else { // update the first message
+					// update the first message (append text)
+					if err := updateMessage(bot, conf, mergedText, chatID, *firstMessageID); err != nil {
+						log.Printf("failed to update stream messages [%+v + %+v] with '%+v': %s", parent, original, data, redact(conf, err))
+					}
+				}
+			} else if data.NumTokens != nil {
+				if numTokensInput < data.NumTokens.Input {
+					numTokensInput = data.NumTokens.Input
+				}
+				if numTokensOutput < data.NumTokens.Output {
+					numTokensOutput = data.NumTokens.Output
+				}
+			} else if data.Error != nil {
+				error := errorString(conf, data.Error)
+
+				log.Printf("error from stream: %s", error)
+
+				_, _ = sendMessage(bot, conf, fmt.Sprintf("Failed to iterate stream: %s", error), chatID, nil)
+			} else {
+				log.Printf("unsupported type from stream: %+v", data)
+			}
+		},
+		opts,
+	); err == nil {
 		if conf.Verbose {
-			log.Printf("[verbose] streaming [%+v + %+v] ===> %+v", parent, original, iter)
+			log.Printf("[verbose] streaming [%+v + %+v] ...", parent, original)
 		}
-
-		var firstMessageID *int64 = nil
-		mergedText := ""
-
-		for {
-			if it, err := iter.Next(); err == nil {
-				var candidate *genai.Candidate
-				var content *genai.Content
-				var parts []genai.Part
-
-				if len(it.Candidates) > 0 {
-					// update number of tokens
-					numTokensInput = it.UsageMetadata.PromptTokenCount
-					numTokensOutput = it.UsageMetadata.TotalTokenCount - it.UsageMetadata.PromptTokenCount
-
-					candidate = it.Candidates[0]
-					content = candidate.Content
-
-					if content != nil && len(content.Parts) > 0 {
-						parts = content.Parts
-					} else if candidate.FinishReason > 0 {
-						parts = []genai.Part{genai.Text("<<<" + candidate.FinishReason.String() + ">>>")}
-					} else {
-						parts = []genai.Part{genai.Text("<<<no content in candidate>>>")}
-					}
-				}
-
-				if conf.Verbose {
-					log.Printf("[verbose] streaming answer to chat(%d): %+v", chatID, parts)
-				}
-
-				for _, part := range parts {
-					if text, ok := part.(genai.Text); ok { // (text)
-						generatedText := string(text)
-						mergedText += generatedText
-
-						if firstMessageID == nil { // send the first message
-							if sentMessageID, err := sendMessage(bot, conf, generatedText, chatID, &messageID); err == nil {
-								firstMessageID = &sentMessageID
-							} else {
-								log.Printf("failed to send stream messages [%+v + %+v] with '%+v': %s", parent, original, parts, redact(conf, err))
-							}
-						} else { // update the first message
-							// update the first message (append text)
-							if err := updateMessage(bot, conf, mergedText, chatID, *firstMessageID); err != nil {
-								log.Printf("failed to update stream messages [%+v + %+v] with '%+v': %s", parent, original, parts, redact(conf, err))
-							}
-						}
-					} else {
-						log.Printf("unsupported type of part for streaming: %+v", part)
-					}
-				}
-			} else {
-				if err != iterator.Done {
-					error := errorString(conf, err)
-
-					log.Printf("failed to iterate stream: %s", error)
-
-					_, _ = sendMessage(bot, conf, fmt.Sprintf("Failed to iterate stream: %s", error), chatID, nil)
-				}
-				break
-			}
-		}
-
-		// log if it was successful or not
-		successful := (func() bool {
-			if firstMessageID != nil {
-				// leave a reaction on the first message for notifying the termination of the stream
-				_ = bot.SetMessageReaction(chatID, *firstMessageID, tg.NewMessageReactionWithEmoji("👌"))
-
-				return true
-			}
-			return false
-		})()
-		savePromptAndResult(db, chatID, userID, username, messagesToPrompt(parent, original), uint(numTokensInput), mergedText, uint(numTokensOutput), successful)
-	} else { // send message synchronously
-		if generated, err := session.SendMessage(ctx, prompt...); err == nil {
-			if conf.Verbose {
-				log.Printf("[verbose] [%+v + %+v] ===> %+v", parent, original, generated)
-			}
-
-			var candidate *genai.Candidate
-			var content *genai.Content
-			var parts []genai.Part
-
-			if len(generated.Candidates) > 0 {
-				// update number of tokens
-				numTokensInput = generated.UsageMetadata.PromptTokenCount
-				numTokensOutput = generated.UsageMetadata.TotalTokenCount - generated.UsageMetadata.PromptTokenCount
-
-				candidate = generated.Candidates[0]
-				content = candidate.Content
-
-				if content != nil && len(content.Parts) > 0 {
-					parts = content.Parts
-				} else if candidate.FinishReason > 0 {
-					parts = []genai.Part{genai.Text("Response finished with reason: " + candidate.FinishReason.String())}
-				} else {
-					parts = []genai.Part{genai.Text("There was no part in the generated candidate's content.")}
-				}
-			} else {
-				parts = []genai.Part{genai.Text("There was no response from Gemini API.")}
-			}
-
-			if conf.Verbose {
-				log.Printf("[verbose] sending answer to chat(%d): %+v", chatID, parts)
-			}
-
-			for _, part := range parts {
-				if text, ok := part.(genai.Text); ok { // (text)
-					generatedText := string(text)
-
-					// if answer is too long for telegram api, send it as a text document
-					if len(generatedText) > 4096 {
-						caption := strings.ToValidUTF8(generatedText[:128], "") + "..."
-						if sentMessageID, err := sendFile(bot, conf, []byte(generatedText), chatID, &messageID, &caption); err == nil {
-							// leave a reaction on the sent message
-							_ = bot.SetMessageReaction(chatID, sentMessageID, tg.NewMessageReactionWithEmoji("👌"))
-
-							// save to database (successful)
-							savePromptAndResult(db, chatID, userID, username, messagesToPrompt(parent, original), uint(numTokensInput), generatedText, uint(numTokensOutput), true)
-						} else {
-							log.Printf("failed to answer messages [%+v + %+v] with '%s' as file: %s", parent, original, parts, redact(conf, err))
-
-							_, _ = sendMessage(bot, conf, "Failed to send you the answer as a text file. See the server logs for more information.", chatID, &messageID)
-
-							// save to database (error)
-							savePromptAndResult(db, chatID, userID, username, messagesToPrompt(parent, original), uint(numTokensInput), err.Error(), uint(numTokensOutput), false)
-						}
-					} else {
-						if sentMessageID, err := sendMessage(bot, conf, generatedText, chatID, &messageID); err == nil {
-							// leave a reaction on the sent message
-							_ = bot.SetMessageReaction(chatID, sentMessageID, tg.NewMessageReactionWithEmoji("👌"))
-
-							// save to database (successful)
-							savePromptAndResult(db, chatID, userID, username, messagesToPrompt(parent, original), uint(numTokensInput), generatedText, uint(numTokensOutput), true)
-						} else {
-							log.Printf("failed to answer messages [%+v + %+v] with '%+v': %s", parent, original, parts, redact(conf, err))
-
-							_, _ = sendMessage(bot, conf, "Failed to send you the answer as a text. See the server logs for more information.", chatID, &messageID)
-
-							// save to database (error)
-							savePromptAndResult(db, chatID, userID, username, messagesToPrompt(parent, original), uint(numTokensInput), err.Error(), uint(numTokensOutput), false)
-						}
-					}
-				} else if blob, ok := part.(genai.Blob); ok { // (blob)
-					caption := fmt.Sprintf("%d byte(s) of %s", len(blob.Data), blob.MIMEType)
-					if sentMessageID, err := sendFile(bot, conf, blob.Data, chatID, &messageID, &caption); err == nil {
-						// leave a reaction on the sent message
-						_ = bot.SetMessageReaction(chatID, sentMessageID, tg.NewMessageReactionWithEmoji("👌"))
-
-						generatedText := fmt.Sprintf("%d bytes of %s", len(blob.Data), blob.MIMEType)
-
-						// save to database (successful)
-						savePromptAndResult(db, chatID, userID, username, messagesToPrompt(parent, original), uint(numTokensInput), generatedText, uint(numTokensOutput), true)
-					} else {
-						log.Printf("failed to answer messages [%+v + %+v] with '%s' as file: %s", parent, original, parts, redact(conf, err))
-
-						_, _ = sendMessage(bot, conf, "Failed to send you the answer as a text file. See the server logs for more information.", chatID, &messageID)
-
-						// save to database (error)
-						savePromptAndResult(db, chatID, userID, username, messagesToPrompt(parent, original), uint(numTokensInput), err.Error(), uint(numTokensOutput), false)
-					}
-				} else {
-					log.Printf("unsupported type of part: %+v", part)
-				}
-			}
-		} else {
-			error := errorString(conf, err)
-
-			log.Printf("failed to generate an answer from Gemini: %s", error)
-
-			_, _ = sendMessage(bot, conf, fmt.Sprintf("Failed to generate an answer from Gemini: %s", error), chatID, &messageID)
-
-			// save to database (error)
-			savePromptAndResult(db, chatID, userID, username, messagesToPrompt(parent, original), 0, error, 0, false)
-		}
+	} else {
+		log.Printf("failed to generate stream: %s", err)
 	}
+
+	// log if it was successful or not
+	successful := (func() bool {
+		if firstMessageID != nil {
+			// leave a reaction on the first message for notifying the termination of the stream
+			_ = bot.SetMessageReaction(chatID, *firstMessageID, tg.NewMessageReactionWithEmoji("👌"))
+
+			return true
+		}
+		return false
+	})()
+	savePromptAndResult(db, chatID, userID, username, messagesToPrompt(parent, original), uint(numTokensInput), mergedText, uint(numTokensOutput), successful)
 }
 
 // generate a default system instruction with given configuration
