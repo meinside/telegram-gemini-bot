@@ -489,6 +489,7 @@ func answer(ctx context.Context, bot *tg.Bot, conf config, db *Database, parent,
 	_ = bot.SetMessageReaction(chatID, messageID, tg.NewMessageReactionWithEmoji("👌"))
 
 	gtc := gt.NewClient(*conf.GoogleGenerativeModel, *conf.GoogleAIAPIKey)
+	gtc.SetTimeout(conf.AnswerTimeoutSeconds)
 
 	// set system instruction
 	gtc.SetSystemInstructionFunc(func() string {
