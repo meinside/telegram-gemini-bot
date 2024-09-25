@@ -32,8 +32,8 @@ import (
 
 // constants for default values
 const (
-	defaultGenerativeModel      = "gemini-1.5-flash-latest"
-	defaultAIHarmBlockThreshold = 3
+	defaultGenerativeModel                               = "gemini-1.5-flash-latest"
+	defaultAIHarmBlockThreshold genai.HarmBlockThreshold = genai.HarmBlockOnlyHigh
 
 	defaultSystemInstructionFormat = `You are a Telegram bot which uses Google Gemini API(model: %[1]s).
 
@@ -107,7 +107,7 @@ type config struct {
 	GoogleGenerativeModel *string `json:"google_generative_model,omitempty"`
 
 	// google ai safety settings threshold
-	GoogleAIHarmBlockThreshold *int `json:"google_ai_harm_block_threshold,omitempty"`
+	GoogleAIHarmBlockThreshold *genai.HarmBlockThreshold `json:"google_ai_harm_block_threshold,omitempty"`
 
 	// configurations
 	AllowedTelegramUsers    []string `json:"allowed_telegram_users"`
@@ -500,7 +500,9 @@ func answer(ctx context.Context, bot *tg.Bot, conf config, db *Database, parent,
 		}
 	})
 
-	opts := &gt.GenerationOptions{}
+	opts := &gt.GenerationOptions{
+		HarmBlockThreshold: conf.GoogleAIHarmBlockThreshold,
+	}
 
 	// prompt
 	var promptText string
