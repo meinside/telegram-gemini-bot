@@ -547,7 +547,7 @@ func answer(ctx context.Context, bot *tg.Bot, conf config, db *Database, parent,
 			defer client.Close()
 
 			// upload files and wait
-			if uploaded, err := gt.UploadFilesAndWait(ctx, client, parentFiles); err == nil {
+			if uploaded, err := gtc.UploadFilesAndWait(ctx, parentFiles); err == nil {
 				for _, upload := range uploaded {
 					parts = append(parts, upload)
 				}
