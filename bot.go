@@ -227,7 +227,25 @@ func runBot(conf config) {
 		allowedUsers[user] = true
 	}
 
+	// telegram bot client
 	bot := tg.NewClient(*token)
+
+	// gemini-things client
+	gtc, err := gt.NewClient(*conf.GoogleGenerativeModel, *conf.GoogleAIAPIKey)
+	if err != nil {
+		log.Printf("error initializing gemini-things client: %s", redact(conf, err))
+
+		os.Exit(1)
+	}
+	defer gtc.Close()
+	gtc.SetTimeout(conf.AnswerTimeoutSeconds)
+	gtc.SetSystemInstructionFunc(func() string {
+		if conf.SystemInstruction == nil {
+			return defaultSystemInstruction(conf)
+		} else {
+			return *conf.SystemInstruction
+		}
+	})
 
 	ctx := context.Background()
 
@@ -251,7 +269,7 @@ func runBot(conf config) {
 				return
 			}
 
-			handleMessages(ctx, b, conf, db, []tg.Update{update}, nil)
+			handleMessages(ctx, b, conf, db, gtc, []tg.Update{update}, nil)
 		})
 		bot.SetMediaGroupHandler(func(b *tg.Bot, updates []tg.Update, mediaGroupID string) {
 			for _, update := range updates {
@@ -261,7 +279,7 @@ func runBot(conf config) {
 				}
 			}
 
-			handleMessages(ctx, b, conf, db, updates, &mediaGroupID)
+			handleMessages(ctx, b, conf, db, gtc, updates, &mediaGroupID)
 		})
 		bot.SetInlineQueryHandler(func(b *tg.Bot, update tg.Update, inlineQuery tg.InlineQuery) {
 			options := tg.OptionsAnswerInlineQuery{}.
@@ -349,7 +367,7 @@ func runBot(conf config) {
 }
 
 // handle allowed message updates from telegram bot api
-func handleMessages(ctx context.Context, bot *tg.Bot, conf config, db *Database, updates []tg.Update, mediaGroupID *string) {
+func handleMessages(ctx context.Context, bot *tg.Bot, conf config, db *Database, gtc *gt.Client, updates []tg.Update, mediaGroupID *string) {
 	if len(updates) <= 0 {
 		if mediaGroupID == nil {
 			log.Printf("failed to handle messages: no updates given")
@@ -388,7 +406,7 @@ func handleMessages(ctx context.Context, bot *tg.Bot, conf config, db *Database,
 				ctx, cancel := context.WithTimeout(ctx, time.Duration(conf.AnswerTimeoutSeconds)*time.Second)
 				defer cancel()
 
-				answer(ctx, bot, conf, db, parent, original, chatID, userID, userNameFromUpdate(update), messageID)
+				answer(ctx, bot, conf, db, gtc, parent, original, chatID, userID, userNameFromUpdate(update), messageID)
 
 				if err = ctx.Err(); err == nil {
 					return
@@ -485,21 +503,9 @@ func sendFile(bot *tg.Bot, conf config, data []byte, chatID int64, messageID *in
 }
 
 // generate an answer to given message and send it to the chat
-func answer(ctx context.Context, bot *tg.Bot, conf config, db *Database, parent, original *chatMessage, chatID, userID int64, username string, messageID int64) {
+func answer(ctx context.Context, bot *tg.Bot, conf config, db *Database, gtc *gt.Client, parent, original *chatMessage, chatID, userID int64, username string, messageID int64) {
 	// leave a reaction on the original message for confirmation
 	_ = bot.SetMessageReaction(chatID, messageID, tg.NewMessageReactionWithEmoji("👌"))
-
-	gtc := gt.NewClient(*conf.GoogleGenerativeModel, *conf.GoogleAIAPIKey)
-	gtc.SetTimeout(conf.AnswerTimeoutSeconds)
-
-	// set system instruction
-	gtc.SetSystemInstructionFunc(func() string {
-		if conf.SystemInstruction == nil {
-			return defaultSystemInstruction(conf)
-		} else {
-			return *conf.SystemInstruction
-		}
-	})
 
 	opts := &gt.GenerationOptions{
 		HarmBlockThreshold: conf.GoogleAIHarmBlockThreshold,
