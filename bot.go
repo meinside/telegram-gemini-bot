@@ -513,7 +513,7 @@ func answer(ctx context.Context, bot *tg.Bot, conf config, db *Database, gtc *gt
 
 	// prompt
 	var promptText string
-	promptFiles := []io.Reader{}
+	promptFiles := map[string]io.Reader{}
 	if original != nil {
 		// text
 		promptText = original.text
@@ -523,11 +523,11 @@ func answer(ctx context.Context, bot *tg.Bot, conf config, db *Database, gtc *gt
 		}
 
 		// files
-		for _, file := range promptFilesFromURL {
-			promptFiles = append(promptFiles, bytes.NewReader(file))
+		for i, file := range promptFilesFromURL {
+			promptFiles[fmt.Sprintf("url %d", i+1)] = bytes.NewReader(file)
 		}
-		for _, file := range original.files {
-			promptFiles = append(promptFiles, bytes.NewReader(file))
+		for i, file := range original.files {
+			promptFiles[fmt.Sprintf("file %d", i+1)] = bytes.NewReader(file)
 		}
 
 		if conf.Verbose {
@@ -544,9 +544,9 @@ func answer(ctx context.Context, bot *tg.Bot, conf config, db *Database, gtc *gt
 		}
 
 		// parentFiles
-		parentFiles := []io.Reader{}
-		for _, file := range parent.files {
-			parentFiles = append(parentFiles, bytes.NewReader(file))
+		parentFiles := map[string]io.Reader{}
+		for i, file := range parent.files {
+			parentFiles[fmt.Sprintf("file %d", i+1)] = bytes.NewReader(file)
 		}
 		client, err := genai.NewClient(ctx, option.WithAPIKey(*conf.GoogleAIAPIKey))
 		if err == nil {
