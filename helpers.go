@@ -158,12 +158,6 @@ func ptr[T any](v T) *T {
 	return &v
 }
 
-// strip trailing charset text from given mime type
-func stripCharsetFromMimeType(mimeType string) string {
-	splitted := strings.Split(mimeType, ";")
-	return splitted[0]
-}
-
 // replace all http urls in given prompt to body texts and/or files
 func convertPromptWithURLs(conf config, prompt string) (converted string, files [][]byte) {
 	files = [][]byte{}

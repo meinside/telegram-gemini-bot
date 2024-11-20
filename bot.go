@@ -231,7 +231,7 @@ func runBot(conf config) {
 	bot := tg.NewClient(*token)
 
 	// gemini-things client
-	gtc, err := gt.NewClient(*conf.GoogleGenerativeModel, *conf.GoogleAIAPIKey)
+	gtc, err := gt.NewClient(*conf.GoogleAIAPIKey, *conf.GoogleGenerativeModel)
 	if err != nil {
 		log.Printf("error initializing gemini-things client: %s", redact(conf, err))
 
