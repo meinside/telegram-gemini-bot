@@ -13,7 +13,6 @@ import (
 	"time"
 
 	// google ai
-	"github.com/google/generative-ai-go/genai"
 
 	// my libraries
 	tg "github.com/meinside/telegram-bot-go"
@@ -123,35 +122,6 @@ func noSuchCommandHandler(conf config, allowedUsers map[string]bool) func(b *tg.
 
 		_, _ = sendMessage(b, conf, fmt.Sprintf(msgCmdNotSupported, cmd), chatID, &messageID)
 	}
-}
-
-// generate safety settings for all supported harm categories
-func safetySettings(threshold genai.HarmBlockThreshold) (settings []*genai.SafetySetting) {
-	for _, category := range []genai.HarmCategory{
-		/*
-			// categories for PaLM 2 (Legacy) models
-			genai.HarmCategoryUnspecified,
-			genai.HarmCategoryDerogatory,
-			genai.HarmCategoryToxicity,
-			genai.HarmCategoryViolence,
-			genai.HarmCategorySexual,
-			genai.HarmCategoryMedical,
-			genai.HarmCategoryDangerous,
-		*/
-
-		// all categories supported by Gemini models
-		genai.HarmCategoryHarassment,
-		genai.HarmCategoryHateSpeech,
-		genai.HarmCategorySexuallyExplicit,
-		genai.HarmCategoryDangerousContent,
-	} {
-		settings = append(settings, &genai.SafetySetting{
-			Category:  category,
-			Threshold: threshold,
-		})
-	}
-
-	return settings
 }
 
 // generate user's name
