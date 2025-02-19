@@ -1,5 +1,5 @@
 {
-  "google_generative_model": "gemini-1.5-flash-latest",
+  "google_generative_model": "gemini-2.0-flash",
   "google_ai_harm_block_threshold": 3,
 
   "allowed_telegram_users": ["user1", "user2"],
