@@ -44,7 +44,7 @@ and set your values:
 
 ```json
 {
-  "google_generative_model": "gemini-1.5-pro-latest",
+  "google_generative_model": "gemini-2.0-flash",
   "google_ai_harm_block_threshold": 3,
 
   "allowed_telegram_users": ["user1", "user2"],
@@ -68,7 +68,7 @@ You can use [Infisical](https://infisical.com/) for saving & retrieving your bot
 
 ```json
 {
-  "google_generative_model": "gemini-1.5-pro-latest",
+  "google_generative_model": "gemini-2.0-flash",
   "google_ai_harm_block_threshold": 3,
 
   "allowed_telegram_users": ["user1", "user2"],
@@ -137,6 +137,7 @@ and `systemctl` enable|start|restart|stop the service.
 
 ## Todos / Known Issues
 
+- [ ] Implement new Gemini 2.0 features (eg. multimodal output, image generation, etc.)
 - [X] Handle inline queries. (Will show last 5 prompts & results requested by the user)
 - [X] Add an option to fetch the content of HTTP URLs in the prompt, and replace them with the fetched content. (Gemini handles URLs automatically sometimes, but not always.)
 - [ ] Handle markdown texts gracefully.
