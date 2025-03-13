@@ -14,7 +14,7 @@ import (
 	"time"
 
 	// google ai
-	"github.com/google/generative-ai-go/genai"
+	"google.golang.org/genai"
 
 	// infisical
 	infisical "github.com/infisical/go-sdk"
@@ -27,13 +27,12 @@ import (
 	// others
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
-	"google.golang.org/api/option"
 )
 
 // constants for default values
 const (
-	defaultGenerativeModel                               = "gemini-1.5-flash-latest"
-	defaultAIHarmBlockThreshold genai.HarmBlockThreshold = genai.HarmBlockOnlyHigh
+	defaultGenerativeModel                               = "gemini-2.0-flash-001"
+	defaultAIHarmBlockThreshold genai.HarmBlockThreshold = genai.HarmBlockThresholdBlockOnlyHigh
 
 	defaultSystemInstructionFormat = `You are a Telegram bot which uses Google Gemini API(model: %[1]s).
 
@@ -514,6 +513,7 @@ func answer(ctx context.Context, bot *tg.Bot, conf config, db *Database, gtc *gt
 	// prompt
 	var promptText string
 	promptFiles := map[string]io.Reader{}
+
 	if original != nil {
 		// text
 		promptText = original.text
@@ -535,33 +535,34 @@ func answer(ctx context.Context, bot *tg.Bot, conf config, db *Database, gtc *gt
 		}
 	}
 
-	// histories
+	// histories (parent message)
 	if parent != nil {
-		// text
+		// text of parent message
 		parentText := parent.text
-		parts := []genai.Part{
-			genai.Text(parentText),
+		parts := []*genai.Part{
+			genai.NewPartFromText(parentText),
 		}
 
-		// parentFiles
+		// files of parent message
 		parentFiles := map[string]io.Reader{}
 		for i, file := range parent.files {
 			parentFiles[fmt.Sprintf("file %d", i+1)] = bytes.NewReader(file)
 		}
-		client, err := genai.NewClient(ctx, option.WithAPIKey(*conf.GoogleAIAPIKey))
-		if err == nil {
-			defer client.Close()
 
-			// upload files and wait
-			if uploaded, err := gtc.UploadFilesAndWait(ctx, parentFiles); err == nil {
-				for _, upload := range uploaded {
-					parts = append(parts, upload)
-				}
+		// upload files and wait
+		parentFilesToUpload := []gt.Prompt{}
+		for filename, file := range parentFiles {
+			parentFilesToUpload = append(parentFilesToUpload, gt.NewFilePrompt(filename, file))
+		}
+		if uploaded, err := gtc.UploadFilesAndWait(ctx, parentFilesToUpload); err == nil {
+			for _, upload := range uploaded {
+				part := upload.ToPart()
+				parts = append(parts, &part)
 			}
 		}
 
 		// set history for generation options
-		opts.History = []*genai.Content{
+		opts.History = []genai.Content{
 			{
 				Role:  string(chatMessageRoleModel),
 				Parts: parts,
@@ -573,13 +574,17 @@ func answer(ctx context.Context, bot *tg.Bot, conf config, db *Database, gtc *gt
 	var numTokensInput int32 = 0
 	var numTokensOutput int32 = 0
 
+	prompts := []gt.Prompt{gt.NewTextPrompt(promptText)}
+	for filename, file := range promptFiles {
+		prompts = append(prompts, gt.NewFilePrompt(filename, file))
+	}
+
 	// generate
 	var firstMessageID *int64 = nil
 	mergedText := ""
 	if err := gtc.GenerateStreamed(
 		ctx,
-		promptText,
-		promptFiles,
+		prompts,
 		func(data gt.StreamCallbackData) {
 			if conf.Verbose {
 				log.Printf("[verbose] streaming answer to chat(%d): %+v", chatID, data)
@@ -602,7 +607,7 @@ func answer(ctx context.Context, bot *tg.Bot, conf config, db *Database, gtc *gt
 					}
 				}
 			} else if data.FinishReason != nil {
-				generatedText := fmt.Sprintf("<<<%s>>>", data.FinishReason.String())
+				generatedText := fmt.Sprintf("<<<%s>>>", *data.FinishReason)
 				mergedText += generatedText
 
 				if firstMessageID == nil { // send the first message

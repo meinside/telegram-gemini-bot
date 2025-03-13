@@ -45,7 +45,7 @@ and set your values:
 ```json
 {
   "google_generative_model": "gemini-2.0-flash",
-  "google_ai_harm_block_threshold": 3,
+  "google_ai_harm_block_threshold": "BLOCK_ONLY_HIGH",
 
   "allowed_telegram_users": ["user1", "user2"],
   "db_filepath": null,
@@ -69,7 +69,7 @@ You can use [Infisical](https://infisical.com/) for saving & retrieving your bot
 ```json
 {
   "google_generative_model": "gemini-2.0-flash",
-  "google_ai_harm_block_threshold": 3,
+  "google_ai_harm_block_threshold": "BLOCK_ONLY_HIGH",
 
   "allowed_telegram_users": ["user1", "user2"],
   "db_filepath": null,
