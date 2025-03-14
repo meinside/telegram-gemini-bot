@@ -31,7 +31,7 @@ import (
 
 // constants for default values
 const (
-	defaultGenerativeModel                               = "gemini-2.0-flash-001"
+	defaultGenerativeModel                               = "gemini-2.0-flash"
 	defaultAIHarmBlockThreshold genai.HarmBlockThreshold = genai.HarmBlockThresholdBlockOnlyHigh
 
 	defaultSystemInstructionFormat = `You are a Telegram bot which uses Google Gemini API(model: %[1]s).
@@ -115,6 +115,7 @@ type config struct {
 	AnswerTimeoutSeconds    int      `json:"answer_timeout_seconds,omitempty"`
 	ReplaceHTTPURLsInPrompt bool     `json:"replace_http_urls_in_prompt,omitempty"`
 	FetchURLTimeoutSeconds  int      `json:"fetch_url_timeout_seconds,omitempty"`
+	ForceUseGoogleSearch    bool     `json:"force_use_google_search,omitempty"`
 	Verbose                 bool     `json:"verbose,omitempty"`
 
 	// telegram bot and google api tokens
@@ -509,6 +510,13 @@ func answer(ctx context.Context, bot *tg.Bot, conf config, db *Database, gtc *gt
 	opts := &gt.GenerationOptions{
 		HarmBlockThreshold: conf.GoogleAIHarmBlockThreshold,
 	}
+	if conf.ForceUseGoogleSearch {
+		opts.Tools = []*genai.Tool{
+			{
+				GoogleSearch: &genai.GoogleSearch{},
+			},
+		}
+	}
 
 	// prompt
 	var promptText string
@@ -552,7 +560,7 @@ func answer(ctx context.Context, bot *tg.Bot, conf config, db *Database, gtc *gt
 		// upload files and wait
 		parentFilesToUpload := []gt.Prompt{}
 		for filename, file := range parentFiles {
-			parentFilesToUpload = append(parentFilesToUpload, gt.NewFilePrompt(filename, file))
+			parentFilesToUpload = append(parentFilesToUpload, gt.PromptFromFile(filename, file))
 		}
 		if uploaded, err := gtc.UploadFilesAndWait(ctx, parentFilesToUpload); err == nil {
 			for _, upload := range uploaded {
@@ -574,9 +582,9 @@ func answer(ctx context.Context, bot *tg.Bot, conf config, db *Database, gtc *gt
 	var numTokensInput int32 = 0
 	var numTokensOutput int32 = 0
 
-	prompts := []gt.Prompt{gt.NewTextPrompt(promptText)}
+	prompts := []gt.Prompt{gt.PromptFromText(promptText)}
 	for filename, file := range promptFiles {
-		prompts = append(prompts, gt.NewFilePrompt(filename, file))
+		prompts = append(prompts, gt.PromptFromFile(filename, file))
 	}
 
 	// generate
