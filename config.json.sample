@@ -6,6 +6,7 @@
   "db_filepath": null,
   "answer_timeout_seconds": 180,
   "replace_http_urls_in_prompt": false,
+  "force_use_google_search": false,
   "verbose": false,
 
   "telegram_bot_token": "123456:abcdefghijklmnop-QRSTUVWXYZ7890",

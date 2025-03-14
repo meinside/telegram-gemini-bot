@@ -51,6 +51,7 @@ and set your values:
   "db_filepath": null,
   "answer_timeout_seconds": 180,
   "replace_http_urls_in_prompt": false,
+  "force_use_google_search": false,
   "verbose": false,
 
   "telegram_bot_token": "123456:abcdefghijklmnop-QRSTUVWXYZ7890",
@@ -75,6 +76,7 @@ You can use [Infisical](https://infisical.com/) for saving & retrieving your bot
   "db_filepath": null,
   "answer_timeout_seconds": 180,
   "replace_http_urls_in_prompt": false,
+  "force_use_google_search": false,
   "verbose": false,
 
   "infisical": {
@@ -137,7 +139,8 @@ and `systemctl` enable|start|restart|stop the service.
 
 ## Todos / Known Issues
 
-- [ ] Implement new Gemini 2.0 features (eg. multimodal output, image generation, etc.)
+- [ ] Implement new Gemini 2.0 features. (eg. multimodal output, image generation, etc.)
+- [ ] Retrieve from Google Search dynamically. (gemini-2.0 doesn't support Google Search dynamic retrieval for now)
 - [X] Handle inline queries. (Will show last 5 prompts & results requested by the user)
 - [X] Add an option to fetch the content of HTTP URLs in the prompt, and replace them with the fetched content. (Gemini handles URLs automatically sometimes, but not always.)
 - [ ] Handle markdown texts gracefully.
