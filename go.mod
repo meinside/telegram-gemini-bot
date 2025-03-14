@@ -5,7 +5,7 @@ go 1.23.1
 require (
 	github.com/PuerkitoBio/goquery v1.10.2
 	github.com/infisical/go-sdk v0.5.0
-	github.com/meinside/gemini-things-go v0.2.1
+	github.com/meinside/gemini-things-go v0.2.2
 	github.com/meinside/telegram-bot-go v0.11.16
 	github.com/meinside/version-go v0.0.3
 	github.com/tailscale/hujson v0.0.0-20250226034555-ec1d1c113d33
