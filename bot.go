@@ -87,15 +87,8 @@ https://github.com/meinside/telegram-gemini-bot/raw/master/PRIVACY.md`
 </link>`
 )
 
-type chatMessageRole string
-
-const (
-	chatMessageRoleModel chatMessageRole = "model"
-	chatMessageRoleUser  chatMessageRole = "user"
-)
-
 type chatMessage struct {
-	role  chatMessageRole
+	role  string
 	text  string
 	files [][]byte
 }
@@ -564,15 +557,14 @@ func answer(ctx context.Context, bot *tg.Bot, conf config, db *Database, gtc *gt
 		}
 		if uploaded, err := gtc.UploadFilesAndWait(ctx, parentFilesToUpload); err == nil {
 			for _, upload := range uploaded {
-				part := upload.ToPart()
-				parts = append(parts, &part)
+				parts = append(parts, ptr(upload.ToPart()))
 			}
 		}
 
 		// set history for generation options
 		opts.History = []genai.Content{
 			{
-				Role:  string(chatMessageRoleModel),
+				Role:  gt.RoleModel,
 				Parts: parts,
 			},
 		}
