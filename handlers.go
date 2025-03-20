@@ -12,9 +12,8 @@ import (
 	"strings"
 	"time"
 
-	// google ai
-
 	// my libraries
+	gt "github.com/meinside/gemini-things-go"
 	tg "github.com/meinside/telegram-bot-go"
 )
 
@@ -155,11 +154,11 @@ func repliedToMessage(message tg.Message) *tg.Message {
 //
 // (if it was sent from bot, make it an assistant's message)
 func convertMessage(bot *tg.Bot, message tg.Message, otherGroupedMessages ...tg.Message) (cm *chatMessage, err error) {
-	var role chatMessageRole
+	var role string
 	if message.IsBot() {
-		role = chatMessageRoleModel
+		role = gt.RoleModel
 	} else {
-		role = chatMessageRoleUser
+		role = gt.RoleUser
 	}
 
 	if message.HasText() {
@@ -254,7 +253,7 @@ func filesFromMessage(bot *tg.Bot, message tg.Message) (files [][]byte, err erro
 // read bytes from given media
 func readMedia(bot *tg.Bot, mediaType, fileID string) (result []byte, err error) {
 	if res := bot.GetFile(fileID); !res.Ok {
-		err = fmt.Errorf("Failed to read bytes from %s: %s", mediaType, *res.Description)
+		err = fmt.Errorf("failed to read bytes from %s: %s", mediaType, *res.Description)
 	} else {
 		fileURL := bot.GetFileURL(*res.Result)
 		result, err = readFileContentAtURL(fileURL)
