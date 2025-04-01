@@ -590,23 +590,8 @@ func answer(ctx context.Context, bot *tg.Bot, conf config, db *Database, gtc *gt
 				log.Printf("[verbose] streaming answer to chat(%d): %+v", chatID, data)
 			}
 
-			if data.TextDelta != nil {
-				generatedText := *data.TextDelta
-				mergedText += generatedText
-
-				if firstMessageID == nil { // send the first message
-					if sentMessageID, err := sendMessage(bot, conf, generatedText, chatID, &messageID); err == nil {
-						firstMessageID = &sentMessageID
-					} else {
-						log.Printf("failed to send stream messages [%+v + %+v] with '%+v': %s", parent, original, data, redact(conf, err))
-					}
-				} else { // update the first message
-					// update the first message (append text)
-					if err := updateMessage(bot, conf, mergedText, chatID, *firstMessageID); err != nil {
-						log.Printf("failed to update stream messages [%+v + %+v] with '%+v': %s", parent, original, data, redact(conf, err))
-					}
-				}
-			} else if data.FinishReason != nil {
+			// check finish reason
+			if data.FinishReason != nil && *data.FinishReason != genai.FinishReasonStop {
 				generatedText := fmt.Sprintf("<<<%s>>>", *data.FinishReason)
 				mergedText += generatedText
 
@@ -622,12 +607,34 @@ func answer(ctx context.Context, bot *tg.Bot, conf config, db *Database, gtc *gt
 						log.Printf("failed to update stream messages [%+v + %+v] with '%+v': %s", parent, original, data, redact(conf, err))
 					}
 				}
-			} else if data.NumTokens != nil {
+			}
+
+			// check tokens
+			if data.NumTokens != nil {
 				if numTokensInput < data.NumTokens.Input {
 					numTokensInput = data.NumTokens.Input
 				}
 				if numTokensOutput < data.NumTokens.Output {
 					numTokensOutput = data.NumTokens.Output
+				}
+			}
+
+			// check stream content
+			if data.TextDelta != nil {
+				generatedText := *data.TextDelta
+				mergedText += generatedText
+
+				if firstMessageID == nil { // send the first message
+					if sentMessageID, err := sendMessage(bot, conf, generatedText, chatID, &messageID); err == nil {
+						firstMessageID = &sentMessageID
+					} else {
+						log.Printf("failed to send stream messages [%+v + %+v] with '%+v': %s", parent, original, data, redact(conf, err))
+					}
+				} else { // update the first message
+					// update the first message (append text)
+					if err := updateMessage(bot, conf, mergedText, chatID, *firstMessageID); err != nil {
+						log.Printf("failed to update stream messages [%+v + %+v] with '%+v': %s", parent, original, data, redact(conf, err))
+					}
 				}
 			} else if data.Error != nil {
 				error := errorString(conf, data.Error)
