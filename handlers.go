@@ -12,6 +12,9 @@ import (
 	"strings"
 	"time"
 
+	// google ai
+	"google.golang.org/genai"
+
 	// my libraries
 	gt "github.com/meinside/gemini-things-go"
 	tg "github.com/meinside/telegram-bot-go"
@@ -154,7 +157,7 @@ func repliedToMessage(message tg.Message) *tg.Message {
 //
 // (if it was sent from bot, make it an assistant's message)
 func convertMessage(bot *tg.Bot, message tg.Message, otherGroupedMessages ...tg.Message) (cm *chatMessage, err error) {
-	var role string
+	var role genai.Role
 	if message.IsBot() {
 		role = gt.RoleModel
 	} else {

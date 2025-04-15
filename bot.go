@@ -88,7 +88,7 @@ https://github.com/meinside/telegram-gemini-bot/raw/master/PRIVACY.md`
 )
 
 type chatMessage struct {
-	role  string
+	role  genai.Role
 	text  string
 	files [][]byte
 }
@@ -564,7 +564,7 @@ func answer(ctx context.Context, bot *tg.Bot, conf config, db *Database, gtc *gt
 		// set history for generation options
 		opts.History = []genai.Content{
 			{
-				Role:  gt.RoleModel,
+				Role:  string(gt.RoleModel),
 				Parts: parts,
 			},
 		}
