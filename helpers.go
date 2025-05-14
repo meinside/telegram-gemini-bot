@@ -15,9 +15,10 @@ import (
 	"time"
 
 	// google ai
-	"google.golang.org/api/googleapi"
 
 	// my libraries
+
+	gt "github.com/meinside/gemini-things-go"
 	tg "github.com/meinside/telegram-bot-go"
 	"github.com/meinside/version-go"
 
@@ -33,9 +34,9 @@ const (
 	urlReplacedWithFileAttachmentFormat = `<file fetched-from="%[1]s" content-type="%[2]s">This element was replaced with the file fetched from '%[1]s', and is attached to the prompt as a file.</file>`
 )
 
-// redact given error for logging and/or messaing
-func redact(conf config, err error) (redacted string) {
-	redacted = err.Error()
+// redactError given error for logging and/or messaing
+func redactError(conf config, err error) (redacted string) {
+	redacted = gt.ErrToStr(err)
 
 	if strings.Contains(redacted, *conf.GoogleAIAPIKey) {
 		redacted = strings.ReplaceAll(redacted, *conf.GoogleAIAPIKey, redactedString)
@@ -45,11 +46,6 @@ func redact(conf config, err error) (redacted string) {
 	}
 
 	return redacted
-}
-
-// redact given googleapi error for logging and/or messaing
-func gerror(conf config, gerr *googleapi.Error) string {
-	return redact(conf, fmt.Errorf("googleapi error: %s", gerr.Body))
 }
 
 // checks if given update is allowed or not
@@ -130,18 +126,6 @@ func helpMessage(conf config) string {
 	)
 }
 
-// convert error to string
-func errorString(conf config, err error) (error string) {
-	var gerr *googleapi.Error
-	if errors.As(err, &gerr) {
-		error = gerror(conf, gerr)
-	} else {
-		error = redact(conf, err)
-	}
-
-	return error
-}
-
 // standardize given JSON (JWCC) bytes
 func standardizeJSON(b []byte) ([]byte, error) {
 	ast, err := hujson.Parse(b)
@@ -211,31 +195,31 @@ func fetchURLContent(conf config, url string) (content []byte, contentType strin
 					_ = doc.Find("link[rel=\"stylesheet\"]").Remove() // css links
 					_ = doc.Find("style").Remove()                    // embeded css styles
 
-					content = []byte(fmt.Sprintf(urlToTextFormat, url, contentType, removeConsecutiveEmptyLines(doc.Text())))
+					content = fmt.Appendf(nil, urlToTextFormat, url, contentType, removeConsecutiveEmptyLines(doc.Text()))
 				} else {
-					content = []byte(fmt.Sprintf(urlToTextFormat, url, contentType, "Failed to read this HTML document."))
+					content = fmt.Appendf(nil, urlToTextFormat, url, contentType, "Failed to read this HTML document.")
 					err = fmt.Errorf("failed to read html document from '%s': %s", url, err)
 				}
 			} else if strings.HasPrefix(contentType, "text/") {
 				var bytes []byte
 				if bytes, err = io.ReadAll(resp.Body); err == nil {
-					content = []byte(fmt.Sprintf(urlToTextFormat, url, contentType, removeConsecutiveEmptyLines(string(bytes))))
+					content = fmt.Appendf(nil, urlToTextFormat, url, contentType, removeConsecutiveEmptyLines(string(bytes)))
 				} else {
-					content = []byte(fmt.Sprintf(urlToTextFormat, url, contentType, "Failed to read this document."))
+					content = fmt.Appendf(nil, urlToTextFormat, url, contentType, "Failed to read this document.")
 					err = fmt.Errorf("failed to read %s document from '%s': %s", contentType, url, err)
 				}
 			}
 		} else if supportedFileMimeType(contentType) {
 			if content, err = io.ReadAll(resp.Body); err != nil {
-				content = []byte(fmt.Sprintf(urlToTextFormat, url, contentType, "Failed to read this file."))
+				content = fmt.Appendf(nil, urlToTextFormat, url, contentType, "Failed to read this file.")
 				err = fmt.Errorf("failed to read %s file from '%s': %s", contentType, url, err)
 			}
 		} else {
-			content = []byte(fmt.Sprintf(urlToTextFormat, url, contentType, fmt.Sprintf("Content type: %s not supported.", contentType)))
+			content = fmt.Appendf(nil, urlToTextFormat, url, contentType, fmt.Sprintf("Content type: %s not supported.", contentType))
 			err = fmt.Errorf("content type %s not supported for url: %s", contentType, url)
 		}
 	} else {
-		content = []byte(fmt.Sprintf(urlToTextFormat, url, contentType, fmt.Sprintf("HTTP Error %d", resp.StatusCode)))
+		content = fmt.Appendf(nil, urlToTextFormat, url, contentType, fmt.Sprintf("HTTP Error %d", resp.StatusCode))
 		err = fmt.Errorf("http error %d from '%s'", resp.StatusCode, url)
 	}
 

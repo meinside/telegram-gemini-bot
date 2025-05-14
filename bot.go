@@ -226,7 +226,7 @@ func runBot(conf config) {
 	// gemini-things client
 	gtc, err := gt.NewClient(*conf.GoogleAIAPIKey, *conf.GoogleGenerativeModel)
 	if err != nil {
-		log.Printf("error initializing gemini-things client: %s", redact(conf, err))
+		log.Printf("error initializing gemini-things client: %s", redactError(conf, err))
 
 		os.Exit(1)
 	}
@@ -251,7 +251,7 @@ func runBot(conf config) {
 		if conf.RequestLogsDBFilepath != "" {
 			var err error
 			if db, err = openDatabase(conf.RequestLogsDBFilepath); err != nil {
-				log.Printf("failed to open request logs db: %s", redact(conf, err))
+				log.Printf("failed to open request logs db: %s", redactError(conf, err))
 			}
 		}
 
@@ -351,7 +351,7 @@ func runBot(conf config) {
 					_, _ = sendMessage(b, conf, msgTypeNotSupported, message.Chat.ID, &message.MessageID)
 				}
 			} else {
-				log.Printf("failed to poll updates: %s", redact(conf, err))
+				log.Printf("failed to poll updates: %s", redactError(conf, err))
 			}
 		})
 	} else {
@@ -405,9 +405,9 @@ func handleMessages(ctx context.Context, bot *tg.Bot, conf config, db *Database,
 					return
 				}
 
-				log.Printf("failed to answer in %d seconds: %s", conf.AnswerTimeoutSeconds, redact(conf, err))
+				log.Printf("failed to answer in %d seconds: %s", conf.AnswerTimeoutSeconds, redactError(conf, err))
 
-				errMessage = fmt.Sprintf("Failed to answer in %d seconds: %s", conf.AnswerTimeoutSeconds, redact(conf, err))
+				errMessage = fmt.Sprintf("Failed to answer in %d seconds: %s", conf.AnswerTimeoutSeconds, redactError(conf, err))
 			} else {
 				log.Printf("no converted chat messages from update: %+v", update)
 
@@ -416,7 +416,7 @@ func handleMessages(ctx context.Context, bot *tg.Bot, conf config, db *Database,
 		} else {
 			log.Printf("failed to get chat messages from telegram message: %s", err)
 
-			errMessage = fmt.Sprintf("Failed to get chat messages from telegram message: %s", redact(conf, err))
+			errMessage = fmt.Sprintf("Failed to get chat messages from telegram message: %s", redactError(conf, err))
 		}
 	} else {
 		log.Printf("no usable message from update: %+v", update)
@@ -599,23 +599,13 @@ func answer(ctx context.Context, bot *tg.Bot, conf config, db *Database, gtc *gt
 					if sentMessageID, err := sendMessage(bot, conf, generatedText, chatID, &messageID); err == nil {
 						firstMessageID = &sentMessageID
 					} else {
-						log.Printf("failed to send stream messages [%+v + %+v] with '%+v': %s", parent, original, data, redact(conf, err))
+						log.Printf("failed to send stream messages [%+v + %+v] with '%+v': %s", parent, original, data, redactError(conf, err))
 					}
 				} else { // update the first message
 					// update the first message (append text)
 					if err := updateMessage(bot, conf, mergedText, chatID, *firstMessageID); err != nil {
-						log.Printf("failed to update stream messages [%+v + %+v] with '%+v': %s", parent, original, data, redact(conf, err))
+						log.Printf("failed to update stream messages [%+v + %+v] with '%+v': %s", parent, original, data, redactError(conf, err))
 					}
-				}
-			}
-
-			// check tokens
-			if data.NumTokens != nil {
-				if numTokensInput < data.NumTokens.Input {
-					numTokensInput = data.NumTokens.Input
-				}
-				if numTokensOutput < data.NumTokens.Output {
-					numTokensOutput = data.NumTokens.Output
 				}
 			}
 
@@ -628,22 +618,30 @@ func answer(ctx context.Context, bot *tg.Bot, conf config, db *Database, gtc *gt
 					if sentMessageID, err := sendMessage(bot, conf, generatedText, chatID, &messageID); err == nil {
 						firstMessageID = &sentMessageID
 					} else {
-						log.Printf("failed to send stream messages [%+v + %+v] with '%+v': %s", parent, original, data, redact(conf, err))
+						log.Printf("failed to send stream messages [%+v + %+v] with '%+v': %s", parent, original, data, redactError(conf, err))
 					}
 				} else { // update the first message
 					// update the first message (append text)
 					if err := updateMessage(bot, conf, mergedText, chatID, *firstMessageID); err != nil {
-						log.Printf("failed to update stream messages [%+v + %+v] with '%+v': %s", parent, original, data, redact(conf, err))
+						log.Printf("failed to update stream messages [%+v + %+v] with '%+v': %s", parent, original, data, redactError(conf, err))
 					}
 				}
 			} else if data.Error != nil {
-				error := errorString(conf, data.Error)
+				error := redactError(conf, data.Error)
 
 				log.Printf("error from stream: %s", error)
 
 				_, _ = sendMessage(bot, conf, fmt.Sprintf("Failed to iterate stream: %s", error), chatID, nil)
-			} else {
-				log.Printf("unsupported type from stream: %+v", data)
+			}
+
+			// check tokens
+			if data.NumTokens != nil {
+				if numTokensInput < data.NumTokens.Input {
+					numTokensInput = data.NumTokens.Input
+				}
+				if numTokensOutput < data.NumTokens.Output {
+					numTokensOutput = data.NumTokens.Output
+				}
 			}
 		},
 		opts,
@@ -652,7 +650,11 @@ func answer(ctx context.Context, bot *tg.Bot, conf config, db *Database, gtc *gt
 			log.Printf("[verbose] streaming [%+v + %+v] ...", parent, original)
 		}
 	} else {
-		log.Printf("failed to generate stream: %s", err)
+		error := redactError(conf, err)
+
+		log.Printf("failed to generate stream: %s", error)
+
+		_, _ = sendMessage(bot, conf, fmt.Sprintf("Generation failed: %s", error), chatID, nil)
 	}
 
 	// log if it was successful or not
