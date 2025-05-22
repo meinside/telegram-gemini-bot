@@ -224,14 +224,17 @@ func runBot(conf config) {
 	bot := tg.NewClient(*token)
 
 	// gemini-things client
-	gtc, err := gt.NewClient(*conf.GoogleAIAPIKey, *conf.GoogleGenerativeModel)
+	gtc, err := gt.NewClient(
+		*conf.GoogleAIAPIKey,
+		gt.WithModel(*conf.GoogleGenerativeModel),
+	)
 	if err != nil {
 		log.Printf("error initializing gemini-things client: %s", redactError(conf, err))
 
 		os.Exit(1)
 	}
 	defer gtc.Close()
-	gtc.SetTimeout(conf.AnswerTimeoutSeconds)
+	gtc.SetTimeoutSeconds(conf.AnswerTimeoutSeconds)
 	gtc.SetSystemInstructionFunc(func() string {
 		if conf.SystemInstruction == nil {
 			return defaultSystemInstruction(conf)
