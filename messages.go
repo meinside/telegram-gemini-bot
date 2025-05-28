@@ -639,6 +639,8 @@ func answerWithImage(
 
 	// generate
 	resultAsText := ""
+	mergedText := ""
+	imageGenerated := false
 	successful := false
 	if generated, err := gtc.Generate(
 		ctx,
@@ -659,6 +661,8 @@ func answerWithImage(
 
 						mimeType := mimetype.Detect(data).String()
 						if strings.HasPrefix(mimeType, "image/") {
+							imageGenerated = true
+
 							if _, e := sendPhoto(
 								bot,
 								conf,
@@ -675,6 +679,8 @@ func answerWithImage(
 						} else {
 							errs = append(errs, fmt.Errorf("non-image part was received (%s)", mimeType))
 						}
+					} else if len(part.Text) > 0 {
+						mergedText += part.Text
 					}
 				}
 			} else if cand.FinishReason != genai.FinishReasonStop {
@@ -690,14 +696,32 @@ func answerWithImage(
 			}
 		}
 		if !successful {
-			if _, e := sendMessage(
-				bot,
-				conf,
-				"Successfully generated image(s), but send failed.",
-				chatID,
-				&messageID,
-			); e != nil {
-				errs = append(errs, fmt.Errorf("failed to send error message: %w", e))
+			if imageGenerated {
+				if _, e := sendMessage(
+					bot,
+					conf,
+					"Successfully generated image(s), but send failed.",
+					chatID,
+					&messageID,
+				); e != nil {
+					errs = append(errs, fmt.Errorf("failed to send error message: %w", e))
+				}
+			} else {
+				if len(mergedText) > 0 {
+					mergedText = fmt.Sprintf("Image generation failed: %s", mergedText)
+				} else {
+					mergedText = "No image was returned from API."
+				}
+
+				if _, e := sendMessage(
+					bot,
+					conf,
+					mergedText,
+					chatID,
+					&messageID,
+				); e != nil {
+					errs = append(errs, fmt.Errorf("failed to send error message: %w", e))
+				}
 			}
 		}
 	} else {
@@ -856,8 +880,6 @@ func answerWithVoice(
 			numTokensOutput = generated.UsageMetadata.CandidatesTokenCount
 		}
 
-		errMsg := `Successfully generated a speech, but send failed.`
-
 	outer:
 		for _, cand := range generated.Candidates {
 			if cand.Content != nil {
@@ -921,7 +943,7 @@ func answerWithVoice(
 			if _, e := sendMessage(
 				bot,
 				conf,
-				errMsg,
+				`No speech was returned from API.`,
 				chatID,
 				&messageID,
 			); e != nil {
