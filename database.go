@@ -7,6 +7,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"slices"
 	"strings"
 
 	"golang.org/x/text/language"
@@ -105,6 +106,12 @@ func (d *Database) loadSuccessfulPrompts(userID int64) (result []Prompt, err err
 		Order("created_at DESC").
 		Limit(numSuccessfulPromptsToLoad).
 		Find(&result)
+
+	// FIXME: remove unsuccessful results with query
+	result = slices.DeleteFunc(result, func(p Prompt) bool {
+		return !p.Result.Successful
+	})
+
 	return result, tx.Error
 }
 

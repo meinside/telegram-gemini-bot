@@ -737,7 +737,6 @@ func answerWithImage(
 			errs = append(errs, fmt.Errorf("failed to send error message: %w", e))
 		}
 	}
-
 	savePromptAndResult(
 		db,
 		chatID,
@@ -963,7 +962,6 @@ func answerWithVoice(
 			errs = append(errs, fmt.Errorf("failed to send error message: %w", e))
 		}
 	}
-
 	savePromptAndResult(
 		db,
 		chatID,
