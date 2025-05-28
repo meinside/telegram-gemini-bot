@@ -5,6 +5,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -23,12 +24,14 @@ import (
 const (
 	defaultPromptForMedias = "Describe provided media(s)."
 
-	readURLContentTimeoutSeconds               = 60  // 1 minute
-	uploadedFileStateCheckIntervalMilliseconds = 300 // 300 milliseconds
+	readURLContentTimeoutSeconds = 60 // 1 minute
 )
 
 // return a /start command handler
-func startCommandHandler(conf config, allowedUsers map[string]bool) func(b *tg.Bot, update tg.Update, args string) {
+func startCommandHandler(
+	conf config,
+	allowedUsers map[string]bool,
+) func(b *tg.Bot, update tg.Update, args string) {
 	return func(b *tg.Bot, update tg.Update, _ string) {
 		if !isAllowed(update, allowedUsers) {
 			log.Printf("start command not allowed: %s", userNameFromUpdate(update))
@@ -48,7 +51,11 @@ func startCommandHandler(conf config, allowedUsers map[string]bool) func(b *tg.B
 }
 
 // return a /stats command handler
-func statsCommandHandler(conf config, db *Database, allowedUsers map[string]bool) func(b *tg.Bot, update tg.Update, args string) {
+func statsCommandHandler(
+	conf config,
+	db *Database,
+	allowedUsers map[string]bool,
+) func(b *tg.Bot, update tg.Update, args string) {
 	return func(b *tg.Bot, update tg.Update, args string) {
 		if !isAllowed(update, allowedUsers) {
 			log.Printf("stats command not allowed: %s", userNameFromUpdate(update))
@@ -69,7 +76,10 @@ func statsCommandHandler(conf config, db *Database, allowedUsers map[string]bool
 }
 
 // return a /help command handler
-func helpCommandHandler(conf config, allowedUsers map[string]bool) func(b *tg.Bot, update tg.Update, args string) {
+func helpCommandHandler(
+	conf config,
+	allowedUsers map[string]bool,
+) func(b *tg.Bot, update tg.Update, args string) {
 	return func(b *tg.Bot, update tg.Update, _ string) {
 		if !isAllowed(update, allowedUsers) {
 			log.Printf("help command not allowed: %s", userNameFromUpdate(update))
@@ -90,7 +100,9 @@ func helpCommandHandler(conf config, allowedUsers map[string]bool) func(b *tg.Bo
 }
 
 // return a /privacy command handler
-func privacyCommandHandler(conf config) func(b *tg.Bot, update tg.Update, args string) {
+func privacyCommandHandler(
+	conf config,
+) func(b *tg.Bot, update tg.Update, args string) {
 	return func(b *tg.Bot, update tg.Update, _ string) {
 		message := usableMessageFromUpdate(update)
 		if message == nil {
@@ -105,8 +117,181 @@ func privacyCommandHandler(conf config) func(b *tg.Bot, update tg.Update, args s
 	}
 }
 
+// return a /image command handler
+func genImageCommandHandler(
+	ctx context.Context,
+	conf config,
+	db *Database,
+	gtc *gt.Client,
+	allowedUsers map[string]bool,
+) func(b *tg.Bot, update tg.Update, args string) {
+	return func(b *tg.Bot, update tg.Update, args string) {
+		if !isAllowed(update, allowedUsers) {
+			log.Printf("message not allowed: %s", userNameFromUpdate(update))
+			return
+		}
+
+		message := usableMessageFromUpdate(update)
+		if message == nil {
+			log.Printf("no usable message from update.")
+			return
+		}
+
+		chatID := message.Chat.ID
+		userID := message.From.ID
+		messageID := message.MessageID
+		username := userNameFromUpdate(update)
+
+		// handle empty `args`
+		if len(args) <= 0 {
+			if _, err := sendMessage(
+				b,
+				conf,
+				msgPromptNotGiven,
+				chatID,
+				&messageID,
+			); err != nil {
+				log.Printf("failed to send error message: %s", redactError(conf, err))
+			}
+			return
+		}
+
+		if parent, original, err := chatMessagesFromTGMessage(b, *message); err == nil {
+			if err := answerWithImage(
+				ctx,
+				b,
+				conf,
+				db,
+				gtc,
+				parent,
+				original,
+				chatID,
+				userID,
+				username,
+				messageID,
+			); err != nil {
+				log.Printf("failed to answer with image: %s", redactError(conf, err))
+			}
+		} else {
+			log.Printf("failed to get chat message from telegram message: %s", redactError(conf, err))
+		}
+	}
+}
+
+// return a /speech command handler
+func genSpeechCommandHandler(
+	ctx context.Context,
+	conf config,
+	db *Database,
+	gtc *gt.Client,
+	allowedUsers map[string]bool,
+) func(b *tg.Bot, update tg.Update, args string) {
+	return func(b *tg.Bot, update tg.Update, args string) {
+		if !isAllowed(update, allowedUsers) {
+			log.Printf("message not allowed: %s", userNameFromUpdate(update))
+			return
+		}
+
+		message := usableMessageFromUpdate(update)
+		if message == nil {
+			log.Printf("no usable message from update.")
+			return
+		}
+
+		chatID := message.Chat.ID
+		userID := message.From.ID
+		messageID := message.MessageID
+		username := userNameFromUpdate(update)
+
+		// handle empty `args`
+		if len(args) <= 0 {
+			if _, err := sendMessage(
+				b,
+				conf,
+				msgPromptNotGiven,
+				chatID,
+				&messageID,
+			); err != nil {
+				log.Printf("failed to send error message: %s", redactError(conf, err))
+			}
+			return
+		}
+
+		if parent, original, err := chatMessagesFromTGMessage(b, *message); err == nil {
+			answerWithVoice(
+				ctx,
+				b,
+				conf,
+				db,
+				gtc,
+				parent,
+				original,
+				chatID,
+				userID,
+				username,
+				messageID,
+			)
+		} else {
+			log.Printf("failed to answer with speech: %s", redactError(conf, err))
+		}
+	}
+}
+
+// return a /google command handler
+func genWithGoogleSearchCommandHandler(
+	ctx context.Context,
+	conf config,
+	db *Database,
+	gtc *gt.Client,
+	allowedUsers map[string]bool,
+) func(b *tg.Bot, update tg.Update, args string) {
+	return func(b *tg.Bot, update tg.Update, args string) {
+		if !isAllowed(update, allowedUsers) {
+			log.Printf("message not allowed: %s", userNameFromUpdate(update))
+			return
+		}
+
+		message := usableMessageFromUpdate(update)
+		if message == nil {
+			log.Printf("no usable message from update.")
+			return
+		}
+
+		chatID := message.Chat.ID
+		messageID := message.MessageID
+
+		// handle empty `args`
+		if len(args) <= 0 {
+			if _, err := sendMessage(
+				b,
+				conf,
+				msgPromptNotGiven,
+				chatID,
+				&messageID,
+			); err != nil {
+				log.Printf("failed to send error message: %s", redactError(conf, err))
+			}
+			return
+		}
+
+		handleMessages(
+			ctx,
+			b,
+			conf,
+			db,
+			gtc,
+			[]tg.Update{update},
+			nil,
+			true,
+		)
+	}
+}
+
 // return a 'no such command' handler
-func noSuchCommandHandler(conf config, allowedUsers map[string]bool) func(b *tg.Bot, update tg.Update, cmd, args string) {
+func noSuchCommandHandler(
+	conf config,
+	allowedUsers map[string]bool,
+) func(b *tg.Bot, update tg.Update, cmd, args string) {
 	return func(b *tg.Bot, update tg.Update, cmd, args string) {
 		if !isAllowed(update, allowedUsers) {
 			log.Printf("command not allowed: %s", userNameFromUpdate(update))
@@ -156,7 +341,11 @@ func repliedToMessage(message tg.Message) *tg.Message {
 // convert given telegram bot message to an genai chat message,
 //
 // (if it was sent from bot, make it an assistant's message)
-func convertMessage(bot *tg.Bot, message tg.Message, otherGroupedMessages ...tg.Message) (cm *chatMessage, err error) {
+func convertMessage(
+	bot *tg.Bot,
+	message tg.Message,
+	otherGroupedMessages ...tg.Message,
+) (cm *chatMessage, err error) {
 	var role genai.Role
 	if message.IsBot() {
 		role = gt.RoleModel
@@ -201,7 +390,10 @@ func convertMessage(bot *tg.Bot, message tg.Message, otherGroupedMessages ...tg.
 }
 
 // extract file bytes from given message
-func filesFromMessage(bot *tg.Bot, message tg.Message) (files [][]byte, err error) {
+func filesFromMessage(
+	bot *tg.Bot,
+	message tg.Message,
+) (files [][]byte, err error) {
 	var bytes []byte
 	if message.HasPhoto() {
 		files = [][]byte{}
@@ -254,7 +446,10 @@ func filesFromMessage(bot *tg.Bot, message tg.Message) (files [][]byte, err erro
 }
 
 // read bytes from given media
-func readMedia(bot *tg.Bot, mediaType, fileID string) (result []byte, err error) {
+func readMedia(
+	bot *tg.Bot,
+	mediaType, fileID string,
+) (result []byte, err error) {
 	if res := bot.GetFile(fileID); !res.Ok {
 		err = fmt.Errorf("failed to read bytes from %s: %s", mediaType, *res.Description)
 	} else {
@@ -287,7 +482,9 @@ func readFileContentAtURL(url string) (content []byte, err error) {
 }
 
 // convert chat messages to a prompt for logging
-func messagesToPrompt(parent, original *chatMessage) string {
+func messagesToPrompt(
+	parent, original *chatMessage,
+) string {
 	messages := []chatMessage{}
 	if parent != nil {
 		messages = append(messages, *parent)
