@@ -1,4 +1,6 @@
 // database.go
+//
+// things for database
 
 package main
 

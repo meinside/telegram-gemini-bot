@@ -5,6 +5,8 @@
 
   "google_ai_harm_block_threshold": "BLOCK_ONLY_HIGH",
 
+  "google_generative_model_for_speech_generation_voice": "Autonoe",
+
   "allowed_telegram_users": ["user1", "user2"],
   "db_filepath": null,
   "answer_timeout_seconds": 180,
