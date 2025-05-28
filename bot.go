@@ -29,6 +29,9 @@ const (
 
 	defaultAIHarmBlockThreshold genai.HarmBlockThreshold = genai.HarmBlockThresholdBlockOnlyHigh
 
+	// https://ai.google.dev/gemini-api/docs/speech-generation#voices
+	defaultGenerativeModelForSpeechGenerationVoice = `Kore`
+
 	defaultSystemInstructionFormat = `You are a Telegram bot which uses Google Gemini API.
 
 Current datetime is %[1]s.

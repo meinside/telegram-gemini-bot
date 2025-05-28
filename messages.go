@@ -759,6 +759,15 @@ func answerWithVoice(
 			gt.ResponseModalityAudio,
 		},
 	}
+	if conf.GoogleGenerativeModelForSpeechGenerationVoice != nil {
+		opts.SpeechConfig = &genai.SpeechConfig{
+			VoiceConfig: &genai.VoiceConfig{
+				PrebuiltVoiceConfig: &genai.PrebuiltVoiceConfig{
+					VoiceName: *conf.GoogleGenerativeModelForSpeechGenerationVoice,
+				},
+			},
+		}
+	}
 
 	// prompt
 	var promptText string

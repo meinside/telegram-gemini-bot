@@ -30,6 +30,9 @@ type config struct {
 	// google ai safety settings threshold
 	GoogleAIHarmBlockThreshold *genai.HarmBlockThreshold `json:"google_ai_harm_block_threshold,omitempty"`
 
+	// google ai speech generation settings
+	GoogleGenerativeModelForSpeechGenerationVoice *string `json:"google_generative_model_for_speech_generation_voice,omitempty"`
+
 	// configurations
 	AllowedTelegramUsers    []string `json:"allowed_telegram_users"`
 	RequestLogsDBFilepath   string   `json:"db_filepath,omitempty"`
@@ -128,6 +131,9 @@ func loadConfig(fpath string) (conf config, err error) {
 				}
 				if conf.GoogleGenerativeModelForSpeechGeneration == nil {
 					conf.GoogleGenerativeModelForSpeechGeneration = ptr(defaultGenerativeModelForSpeechGeneration)
+				}
+				if conf.GoogleGenerativeModelForSpeechGenerationVoice == nil {
+					conf.GoogleGenerativeModelForSpeechGenerationVoice = ptr(defaultGenerativeModelForSpeechGenerationVoice)
 				}
 				if conf.GoogleAIHarmBlockThreshold == nil {
 					conf.GoogleAIHarmBlockThreshold = ptr(defaultAIHarmBlockThreshold)
