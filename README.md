@@ -30,6 +30,7 @@ A telegram bot which answers to messages with [Gemini API](https://ai.google.dev
 * A [Telegram Bot Token](https://telegram.me/BotFather),
 * A [Google API key](https://aistudio.google.com/app/apikey), and
 * A machine which can build and run golang applications.
+* (Optional) [ffmpeg](https://ffmpeg.org/) installed for speech generation.
 
 ## Configurations
 
@@ -45,13 +46,15 @@ and set your values:
 ```json
 {
   "google_generative_model": "gemini-2.0-flash",
+  "google_generative_model_for_image_generation": "gemini-2.0-flash-preview-image-generation",
+  "google_generative_model_for_speech_generation": "gemini-2.5-flash-preview-tts",
+
   "google_ai_harm_block_threshold": "BLOCK_ONLY_HIGH",
 
   "allowed_telegram_users": ["user1", "user2"],
   "db_filepath": null,
   "answer_timeout_seconds": 180,
   "replace_http_urls_in_prompt": false,
-  "force_use_google_search": false,
   "verbose": false,
 
   "telegram_bot_token": "123456:abcdefghijklmnop-QRSTUVWXYZ7890",
@@ -70,13 +73,15 @@ You can use [Infisical](https://infisical.com/) for saving & retrieving your bot
 ```json
 {
   "google_generative_model": "gemini-2.0-flash",
+  "google_generative_model_for_image_generation": "gemini-2.0-flash-preview-image-generation",
+  "google_generative_model_for_speech_generation": "gemini-2.5-flash-preview-tts",
+
   "google_ai_harm_block_threshold": "BLOCK_ONLY_HIGH",
 
   "allowed_telegram_users": ["user1", "user2"],
   "db_filepath": null,
   "answer_timeout_seconds": 180,
   "replace_http_urls_in_prompt": false,
-  "force_use_google_search": false,
   "verbose": false,
 
   "infisical": {
@@ -134,13 +139,17 @@ and `systemctl` enable|start|restart|stop the service.
 
 ## Commands
 
+- `/image <PROMPT>` for image generation.
+- `/speech <PROMPT>` for speech generation.
+- `/google <PROMPT>` for generation with grounding (Google Search).
 - `/stats` for various statistics of this bot.
 - `/help` for help message.
 
 ## Todos / Known Issues
 
-- [ ] Implement new Gemini 2.0 features. (eg. multimodal output, image generation, etc.)
-- [ ] Retrieve from Google Search dynamically. (gemini-2.0 doesn't support Google Search dynamic retrieval for now)
+- [X] Image generation.
+- [X] Speech generation.
+- [X] Generation with grounding (Google Search).
 - [X] Handle inline queries. (Will show last 5 prompts & results requested by the user)
 - [X] Add an option to fetch the content of HTTP URLs in the prompt, and replace them with the fetched content. (Gemini handles URLs automatically sometimes, but not always.)
 - [ ] Handle markdown texts gracefully.

@@ -5,19 +5,19 @@
 package main
 
 import (
+	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"os/exec"
 	"regexp"
 	"slices"
 	"strings"
 	"time"
 
-	// google ai
-
 	// my libraries
-
 	gt "github.com/meinside/gemini-things-go"
 	tg "github.com/meinside/telegram-bot-go"
 	"github.com/meinside/version-go"
@@ -30,7 +30,7 @@ import (
 const (
 	httpUserAgent = `TGB/url2text`
 
-	redactedString                      = "<REDACTED>"
+	redactedString                      = `<REDACTED>`
 	urlReplacedWithFileAttachmentFormat = `<file fetched-from="%[1]s" content-type="%[2]s">This element was replaced with the file fetched from '%[1]s', and is attached to the prompt as a file.</file>`
 )
 
@@ -49,7 +49,10 @@ func redactError(conf config, err error) (redacted string) {
 }
 
 // checks if given update is allowed or not
-func isAllowed(update tg.Update, allowedUsers map[string]bool) bool {
+func isAllowed(
+	update tg.Update,
+	allowedUsers map[string]bool,
+) bool {
 	var username string
 	if update.HasMessage() && update.Message.From.Username != nil {
 		username = *update.Message.From.Username
@@ -92,7 +95,11 @@ func usableMessageFromUpdate(update tg.Update) (message *tg.Message) {
 }
 
 // convert telegram bot message into chat messages
-func chatMessagesFromTGMessage(bot *tg.Bot, message tg.Message, otherGroupedMessages ...tg.Message) (parent, original *chatMessage, err error) {
+func chatMessagesFromTGMessage(
+	bot *tg.Bot,
+	message tg.Message,
+	otherGroupedMessages ...tg.Message,
+) (parent, original *chatMessage, err error) {
 	replyTo := repliedToMessage(message)
 	errs := []error{}
 
@@ -119,7 +126,12 @@ func chatMessagesFromTGMessage(bot *tg.Bot, message tg.Message, otherGroupedMess
 func helpMessage(conf config) string {
 	return fmt.Sprintf(msgHelp,
 		*conf.GoogleGenerativeModel,
+		*conf.GoogleGenerativeModelForImageGeneration,
+		*conf.GoogleGenerativeModelForSpeechGeneration,
 		version.Build(version.OS|version.Architecture|version.Revision),
+		cmdGenerateImage+" <prompt>", descGenerateImage,
+		cmdGenerateSpeech+" <prompt>", descGenerateSpeech,
+		cmdGenerateWithGoogleSearch+" <prompt>", descGenerateWithGoogleSearch,
 		cmdStats, descStats,
 		cmdPrivacy, descPrivacy,
 		cmdHelp, descHelp,
@@ -143,7 +155,10 @@ func ptr[T any](v T) *T {
 }
 
 // replace all http urls in given prompt to body texts and/or files
-func convertPromptWithURLs(conf config, prompt string) (converted string, files [][]byte) {
+func convertPromptWithURLs(
+	conf config,
+	prompt string,
+) (converted string, files [][]byte) {
 	files = [][]byte{}
 
 	re := regexp.MustCompile(urlRegexp)
@@ -166,7 +181,10 @@ func convertPromptWithURLs(conf config, prompt string) (converted string, files 
 }
 
 // fetch the content from given url and convert it to text for prompting.
-func fetchURLContent(conf config, url string) (content []byte, contentType string, err error) {
+func fetchURLContent(
+	conf config,
+	url string,
+) (content []byte, contentType string, err error) {
 	client := &http.Client{
 		Timeout: time.Duration(conf.FetchURLTimeoutSeconds) * time.Second,
 	}
@@ -326,4 +344,80 @@ func supportedHTTPContentType(contentType string) bool {
 			return false
 		}
 	}(contentType)
+}
+
+// convert pcm data to wav
+func pcmToWav(pcmBytes []byte, sampleRate, bitDepth, numChannels int) (converted []byte, err error) {
+	var buf bytes.Buffer
+
+	// wav header
+	dataLen := uint32(len(pcmBytes))
+	header := struct {
+		ChunkID       [4]byte // "RIFF"
+		ChunkSize     uint32
+		Format        [4]byte // "WAVE"
+		Subchunk1ID   [4]byte // "fmt "
+		Subchunk1Size uint32
+		AudioFormat   uint16
+		NumChannels   uint16
+		SampleRate    uint32
+		ByteRate      uint32
+		BlockAlign    uint16
+		BitsPerSample uint16
+		Subchunk2ID   [4]byte // "data"
+		Subchunk2Size uint32
+	}{
+		ChunkID:       [4]byte{'R', 'I', 'F', 'F'},
+		ChunkSize:     36 + dataLen,
+		Format:        [4]byte{'W', 'A', 'V', 'E'},
+		Subchunk1ID:   [4]byte{'f', 'm', 't', ' '},
+		Subchunk1Size: 16,
+		AudioFormat:   1, // PCM
+		NumChannels:   uint16(numChannels),
+		SampleRate:    uint32(sampleRate),
+		ByteRate:      uint32(sampleRate * numChannels * bitDepth / 8),
+		BlockAlign:    uint16(numChannels * bitDepth / 8),
+		BitsPerSample: uint16(bitDepth),
+		Subchunk2ID:   [4]byte{'d', 'a', 't', 'a'},
+		Subchunk2Size: dataLen,
+	}
+
+	// write wav header
+	if err := binary.Write(&buf, binary.LittleEndian, header); err != nil {
+		return nil, fmt.Errorf("failed to write wav header: %w", err)
+	}
+
+	// write pcm data
+	if _, err := buf.Write(pcmBytes); err != nil {
+		return nil, fmt.Errorf("failed to write pcm data: %w", err)
+	}
+
+	return buf.Bytes(), nil
+}
+
+// convert wav to ogg with `ffmpeg`
+func wavToOGG(wavBytes []byte) ([]byte, error) {
+	cmd := exec.Command(
+		"ffmpeg",
+		"-hide_banner",
+		"-loglevel", "error",
+		"-i", "pipe:0", // input from stdin
+		"-c:a", "libopus",
+		"-b:a", "128k",
+		"-f", "ogg",
+		"pipe:1", // output to stdout
+	)
+
+	cmd.Stdin = bytes.NewReader(wavBytes)
+	var out bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	if err != nil {
+		return nil, fmt.Errorf("ffmpeg error: %w (%s)", err, stderr.String())
+	}
+
+	return out.Bytes(), nil
 }
