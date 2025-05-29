@@ -557,9 +557,9 @@ func answerWithImage(
 
 	opts := &gt.GenerationOptions{
 		HarmBlockThreshold: conf.GoogleAIHarmBlockThreshold,
-		ResponseModalities: []gt.ResponseModality{
-			gt.ResponseModalityText,
-			gt.ResponseModalityImage,
+		ResponseModalities: []genai.Modality{
+			genai.ModalityText,
+			genai.ModalityImage,
 		},
 	}
 
@@ -778,8 +778,8 @@ func answerWithVoice(
 
 	opts := &gt.GenerationOptions{
 		HarmBlockThreshold: conf.GoogleAIHarmBlockThreshold,
-		ResponseModalities: []gt.ResponseModality{
-			gt.ResponseModalityAudio,
+		ResponseModalities: []genai.Modality{
+			genai.ModalityAudio,
 		},
 	}
 	if conf.GoogleGenerativeModelForSpeechGenerationVoice != nil {
