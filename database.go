@@ -7,7 +7,6 @@ package main
 import (
 	"fmt"
 	"log"
-	"slices"
 	"strings"
 
 	"golang.org/x/text/language"
@@ -102,15 +101,11 @@ const (
 func (d *Database) loadSuccessfulPrompts(userID int64) (result []Prompt, err error) {
 	tx := d.db.Model(&Prompt{}).
 		Preload("Result").
-		Where("user_id = ?", userID).
-		Order("created_at DESC").
+		Joins("JOIN generateds ON generateds.prompt_id = prompts.id").
+		Where("prompts.user_id = ? AND generateds.successful = ?", userID, true).
+		Order("prompts.created_at DESC").
 		Limit(numSuccessfulPromptsToLoad).
 		Find(&result)
-
-	// FIXME: remove unsuccessful results with query
-	result = slices.DeleteFunc(result, func(p Prompt) bool {
-		return !p.Result.Successful
-	})
 
 	return result, tx.Error
 }
