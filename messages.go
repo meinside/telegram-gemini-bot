@@ -93,7 +93,7 @@ func handleMessages(
 				} else {
 					log.Printf("failed to answer message: %s", redactError(conf, e))
 
-					errMessage = fmt.Sprintf("Failed to answer message: %s", redactError(conf, err))
+					errMessage = fmt.Sprintf("Failed to answer message: %s", redactError(conf, e))
 				}
 			} else {
 				log.Printf("no converted chat messages from update: %+v", update)
@@ -488,17 +488,6 @@ func answer(
 		}
 	} else {
 		errs = append(errs, fmt.Errorf("failed to generate stream: %w", err))
-
-		// send error message
-		if _, e := sendMessage(
-			bot,
-			conf,
-			fmt.Sprintf("Generation failed: %s", redactError(conf, err)),
-			chatID,
-			nil,
-		); e != nil {
-			errs = append(errs, fmt.Errorf("failed to send error message: %w", e))
-		}
 	}
 
 	// log if it was successful or not
