@@ -1,5 +1,5 @@
 {
-  "google_generative_model": "gemini-2.0-flash",
+  "google_generative_model": "gemini-2.5-flash",
   "google_generative_model_for_image_generation": "gemini-2.0-flash-preview-image-generation",
   "google_generative_model_for_speech_generation": "gemini-2.5-flash-preview-tts",
 
@@ -10,7 +10,6 @@
   "allowed_telegram_users": ["user1", "user2"],
   "db_filepath": null,
   "answer_timeout_seconds": 180,
-  "replace_http_urls_in_prompt": false,
   "verbose": false,
 
   "telegram_bot_token": "123456:abcdefghijklmnop-QRSTUVWXYZ7890",
