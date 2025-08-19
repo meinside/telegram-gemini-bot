@@ -23,6 +23,7 @@ import (
 type config struct {
 	SystemInstruction *string `json:"system_instruction,omitempty"`
 
+	// models
 	GoogleGenerativeModel                    *string `json:"google_generative_model,omitempty"`
 	GoogleGenerativeModelForImageGeneration  *string `json:"google_generative_model_for_image_generation,omitempty"`
 	GoogleGenerativeModelForSpeechGeneration *string `json:"google_generative_model_for_speech_generation,omitempty"`
@@ -34,12 +35,10 @@ type config struct {
 	GoogleGenerativeModelForSpeechGenerationVoice *string `json:"google_generative_model_for_speech_generation_voice,omitempty"`
 
 	// configurations
-	AllowedTelegramUsers    []string `json:"allowed_telegram_users"`
-	RequestLogsDBFilepath   string   `json:"db_filepath,omitempty"`
-	AnswerTimeoutSeconds    int      `json:"answer_timeout_seconds,omitempty"`
-	ReplaceHTTPURLsInPrompt bool     `json:"replace_http_urls_in_prompt,omitempty"`
-	FetchURLTimeoutSeconds  int      `json:"fetch_url_timeout_seconds,omitempty"`
-	Verbose                 bool     `json:"verbose,omitempty"`
+	AllowedTelegramUsers  []string `json:"allowed_telegram_users"`
+	RequestLogsDBFilepath string   `json:"db_filepath,omitempty"`
+	AnswerTimeoutSeconds  int      `json:"answer_timeout_seconds,omitempty"`
+	Verbose               bool     `json:"verbose,omitempty"`
 
 	// telegram bot and google api tokens
 	TelegramBotToken *string `json:"telegram_bot_token,omitempty"`
@@ -140,9 +139,6 @@ func loadConfig(fpath string) (conf config, err error) {
 				}
 				if conf.AnswerTimeoutSeconds <= 0 {
 					conf.AnswerTimeoutSeconds = defaultAnswerTimeoutSeconds
-				}
-				if conf.FetchURLTimeoutSeconds <= 0 {
-					conf.FetchURLTimeoutSeconds = defaultFetchURLTimeoutSeconds
 				}
 
 				// check the existence of essential values

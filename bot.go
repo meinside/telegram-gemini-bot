@@ -23,7 +23,7 @@ import (
 
 // constants for default values
 const (
-	defaultGenerativeModel                    = `gemini-2.0-flash`
+	defaultGenerativeModel                    = `gemini-2.5-flash`
 	defaultGenerativeModelForImageGeneration  = `gemini-2.0-flash-preview-image-generation`
 	defaultGenerativeModelForSpeechGeneration = `gemini-2.5-flash-preview-tts`
 
@@ -91,14 +91,10 @@ const (
 https://github.com/meinside/telegram-gemini-bot/raw/master/PRIVACY.md`
 	msgPromptNotGiven = `Prompt was not given.`
 
-	defaultAnswerTimeoutSeconds   = 180 // 3 minutes
-	defaultFetchURLTimeoutSeconds = 10  // 10 seconds
+	defaultAnswerTimeoutSeconds = 180 // 3 minutes
 
 	// for replacing URLs in prompt to body texts
-	urlRegexp       = `https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)`
-	urlToTextFormat = `<link url="%[1]s" content-type="%[2]s">
-%[3]s
-</link>`
+	urlRegexp = `https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)`
 )
 
 const (
@@ -137,12 +133,12 @@ func runBot(conf config) {
 	gtc.SetTimeoutSeconds(conf.AnswerTimeoutSeconds)
 	gtc.SetSystemInstructionFunc(func() string {
 		if conf.SystemInstruction == nil {
-			return defaultSystemInstruction(conf)
+			return defaultSystemInstruction()
 		} else {
 			return *conf.SystemInstruction
 		}
 	})
-	defer gtc.Close()
+	defer func() { _ = gtc.Close() }()
 
 	// gemini-things client for image generation
 	gtcImg, err := gt.NewClient(
@@ -342,7 +338,7 @@ func runBot(conf config) {
 }
 
 // generate a default system instruction with given configuration
-func defaultSystemInstruction(conf config) string {
+func defaultSystemInstruction() string {
 	return fmt.Sprintf(defaultSystemInstructionFormat,
 		time.Now().Format("2006-01-02 15:04:05 MST (Mon)"),
 	)

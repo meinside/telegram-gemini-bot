@@ -45,7 +45,7 @@ and set your values:
 
 ```json
 {
-  "google_generative_model": "gemini-2.0-flash",
+  "google_generative_model": "gemini-2.5-flash",
   "google_generative_model_for_image_generation": "gemini-2.0-flash-preview-image-generation",
   "google_generative_model_for_speech_generation": "gemini-2.5-flash-preview-tts",
 
@@ -54,7 +54,6 @@ and set your values:
   "allowed_telegram_users": ["user1", "user2"],
   "db_filepath": null,
   "answer_timeout_seconds": 180,
-  "replace_http_urls_in_prompt": false,
   "verbose": false,
 
   "telegram_bot_token": "123456:abcdefghijklmnop-QRSTUVWXYZ7890",
@@ -72,7 +71,7 @@ You can use [Infisical](https://infisical.com/) for saving & retrieving your bot
 
 ```json
 {
-  "google_generative_model": "gemini-2.0-flash",
+  "google_generative_model": "gemini-2.5-flash",
   "google_generative_model_for_image_generation": "gemini-2.0-flash-preview-image-generation",
   "google_generative_model_for_speech_generation": "gemini-2.5-flash-preview-tts",
 
@@ -81,7 +80,6 @@ You can use [Infisical](https://infisical.com/) for saving & retrieving your bot
   "allowed_telegram_users": ["user1", "user2"],
   "db_filepath": null,
   "answer_timeout_seconds": 180,
-  "replace_http_urls_in_prompt": false,
   "verbose": false,
 
   "infisical": {
@@ -114,7 +112,7 @@ $ ./telegram-gemini-bot path-to/config.json
 
 ## Run as a systemd service
 
-Createa a systemd service file:
+Create a systemd service file:
 
 ```
 [Unit]
@@ -147,34 +145,5 @@ and `systemctl` enable|start|restart|stop the service.
 
 ## Todos / Known Issues
 
-- [X] Image generation.
-- [X] Speech generation.
-- [X] Generation with grounding (Google Search).
-- [X] Handle inline queries. (Will show last 5 prompts & results requested by the user)
-- [X] Add an option to fetch the content of HTTP URLs in the prompt, and replace them with the fetched content. (Gemini handles URLs automatically sometimes, but not always.)
 - [ ] Handle markdown texts gracefully.
-
-## License
-
-The MIT License (MIT)
-
-Copyright © 2025 Sungjin Han
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
 

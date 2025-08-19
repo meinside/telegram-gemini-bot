@@ -3,7 +3,6 @@ module github.com/meinside/telegram-gemini-bot
 go 1.23.1
 
 require (
-	github.com/PuerkitoBio/goquery v1.10.3
 	github.com/gabriel-vasile/mimetype v1.4.9
 	github.com/infisical/go-sdk v0.5.99
 	github.com/meinside/gemini-things-go v0.3.29
@@ -22,7 +21,6 @@ require (
 	cloud.google.com/go/auth/oauth2adapt v0.2.8 // indirect
 	cloud.google.com/go/compute/metadata v0.8.0 // indirect
 	cloud.google.com/go/iam v1.5.2 // indirect
-	github.com/andybalholm/cascadia v1.3.3 // indirect
 	github.com/aws/aws-sdk-go-v2 v1.38.0 // indirect
 	github.com/aws/aws-sdk-go-v2/config v1.31.0 // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.18.4 // indirect

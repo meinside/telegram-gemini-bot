@@ -26,15 +26,12 @@ import (
 	"github.com/meinside/version-go"
 
 	// others
-	"github.com/PuerkitoBio/goquery"
+
 	"github.com/tailscale/hujson"
 )
 
 const (
-	httpUserAgent = `TGB/url2text`
-
-	redactedString                      = `<REDACTED>`
-	urlReplacedWithFileAttachmentFormat = `<file fetched-from="%[1]s" content-type="%[2]s">This element was replaced with the file fetched from '%[1]s', and is attached to the prompt as a file.</file>`
+	redactedString = `<REDACTED>`
 
 	defaultPromptForMedias       = "Describe provided media(s)."
 	readURLContentTimeoutSeconds = 60 // 1 minute
@@ -160,196 +157,55 @@ func ptr[T any](v T) *T {
 	return &v
 }
 
-// replace all http urls in given prompt to body texts and/or files
+// convert given prompt with http urls into usable prompts
 func convertPromptWithURLs(
-	conf config,
 	prompt string,
-) (converted string, files [][]byte) {
-	files = [][]byte{}
+) (converted []gt.Prompt) {
+	converted = []gt.Prompt{}
+	remaining := prompt
 
 	re := regexp.MustCompile(urlRegexp)
 	for _, url := range re.FindAllString(prompt, -1) {
-		if content, contentType, err := fetchURLContent(conf, url); err == nil {
-			if supportedHTTPContentType(contentType) {
-				// replace url with fetched content
-				prompt = strings.Replace(prompt, url, fmt.Sprintf("%s\n", string(content)), 1)
-			} else if supportedFileMimeType(contentType) {
-				// replace url with the info,
-				prompt = strings.Replace(prompt, url, fmt.Sprintf(urlReplacedWithFileAttachmentFormat, url, contentType), 1)
-
-				// and append the fetched file to files
-				files = append(files, content)
-			}
-		}
-	}
-
-	return prompt, files
-}
-
-// fetch the content from given url and convert it to text for prompting.
-func fetchURLContent(
-	conf config,
-	url string,
-) (content []byte, contentType string, err error) {
-	client := &http.Client{
-		Timeout: time.Duration(conf.FetchURLTimeoutSeconds) * time.Second,
-	}
-
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return content, contentType, fmt.Errorf("failed to create http request: %s", err)
-	}
-	req.Header.Set("User-Agent", httpUserAgent)
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return content, contentType, fmt.Errorf("failed to fetch contents from url: %s", err)
-	}
-	defer resp.Body.Close()
-
-	contentType = resp.Header.Get("Content-Type")
-
-	if resp.StatusCode == 200 {
-		if supportedHTTPContentType(contentType) {
-			if strings.HasPrefix(contentType, "text/html") {
-				var doc *goquery.Document
-				if doc, err = goquery.NewDocumentFromReader(resp.Body); err == nil {
-					// NOTE: removing unwanted things from HTML
-					_ = doc.Find("script").Remove()                   // javascripts
-					_ = doc.Find("link[rel=\"stylesheet\"]").Remove() // css links
-					_ = doc.Find("style").Remove()                    // embeded css styles
-
-					content = fmt.Appendf(nil, urlToTextFormat, url, contentType, removeConsecutiveEmptyLines(doc.Text()))
-				} else {
-					content = fmt.Appendf(nil, urlToTextFormat, url, contentType, "Failed to read this HTML document.")
-					err = fmt.Errorf("failed to read html document from '%s': %s", url, err)
+		if before, after, found := strings.Cut(remaining, url); found {
+			if isURLFromYoutube(url) {
+				if len(before) > 0 {
+					converted = append(
+						converted,
+						gt.PromptFromText(before),
+					)
 				}
-			} else if strings.HasPrefix(contentType, "text/") {
-				var bytes []byte
-				if bytes, err = io.ReadAll(resp.Body); err == nil {
-					content = fmt.Appendf(nil, urlToTextFormat, url, contentType, removeConsecutiveEmptyLines(string(bytes)))
-				} else {
-					content = fmt.Appendf(nil, urlToTextFormat, url, contentType, "Failed to read this document.")
-					err = fmt.Errorf("failed to read %s document from '%s': %s", contentType, url, err)
-				}
+				converted = append(
+					converted,
+					gt.PromptFromURI(url),
+				)
+			} else {
+				converted = append(
+					converted,
+					gt.PromptFromText(before+after),
+				)
 			}
-		} else if supportedFileMimeType(contentType) {
-			if content, err = io.ReadAll(resp.Body); err != nil {
-				content = fmt.Appendf(nil, urlToTextFormat, url, contentType, "Failed to read this file.")
-				err = fmt.Errorf("failed to read %s file from '%s': %s", contentType, url, err)
-			}
-		} else {
-			content = fmt.Appendf(nil, urlToTextFormat, url, contentType, fmt.Sprintf("Content type: %s not supported.", contentType))
-			err = fmt.Errorf("content type %s not supported for url: %s", contentType, url)
+			remaining = after
 		}
-	} else {
-		content = fmt.Appendf(nil, urlToTextFormat, url, contentType, fmt.Sprintf("HTTP Error %d", resp.StatusCode))
-		err = fmt.Errorf("http error %d from '%s'", resp.StatusCode, url)
 	}
 
-	return content, contentType, err
-}
-
-// remove consecutive empty lines for compacting prompt lines
-func removeConsecutiveEmptyLines(input string) string {
-	// trim each line
-	trimmed := []string{}
-	for _, line := range strings.Split(input, "\n") {
-		trimmed = append(trimmed, strings.TrimRight(line, " "))
+	if len(remaining) > 0 {
+		converted = append(
+			converted,
+			gt.PromptFromText(remaining),
+		)
 	}
-	input = strings.Join(trimmed, "\n")
 
-	// remove redundant empty lines
-	regex := regexp.MustCompile("\n{2,}")
-	return regex.ReplaceAllString(input, "\n")
+	return converted
 }
 
-// check if given file's mime type is supported
-//
-// https://ai.google.dev/gemini-api/docs/prompting_with_media?lang=go#supported_file_formats
-func supportedFileMimeType(mimeType string) bool {
-	return func(mimeType string) bool {
-		switch {
-		// images
-		//
-		// https://ai.google.dev/gemini-api/docs/prompting_with_media?lang=go#image_formats
-		case slices.Contains([]string{
-			"image/png",
-			"image/jpeg",
-			"image/webp",
-			"image/heic",
-			"image/heif",
-		}, mimeType):
-			return true
-		// audios
-		//
-		// https://ai.google.dev/gemini-api/docs/prompting_with_media?lang=go#audio_formats
-		case slices.Contains([]string{
-			"audio/wav",
-			"audio/mp3",
-			"audio/aiff",
-			"audio/aac",
-			"audio/ogg",
-			"audio/flac",
-		}, mimeType):
-			return true
-		// videos
-		//
-		// https://ai.google.dev/gemini-api/docs/prompting_with_media?lang=go#video_formats
-		case slices.Contains([]string{
-			"video/mp4",
-			"video/mpeg",
-			"video/mov",
-			"video/avi",
-			"video/x-flv",
-			"video/mpg",
-			"video/webm",
-			"video/wmv",
-			"video/3gpp",
-		}, mimeType):
-			return true
-		// plain text formats
-		//
-		// https://ai.google.dev/gemini-api/docs/prompting_with_media?lang=go#plain_text_formats
-		case slices.Contains([]string{
-			"text/plain",
-			"text/html",
-			"text/css",
-			"text/javascript",
-			"application/x-javascript",
-			"text/x-typescript",
-			"application/x-typescript",
-			"text/csv",
-			"text/markdown",
-			"text/x-python",
-			"application/x-python-code",
-			"application/json",
-			"text/xml",
-			"application/rtf",
-			"text/rtf",
-
-			// FIXME: not stated in the document yet
-			"application/pdf",
-		}, mimeType):
-			return true
-		default:
-			return false
-		}
-	}(mimeType)
-}
-
-// check if given HTTP content type is supported
-func supportedHTTPContentType(contentType string) bool {
-	return func(contentType string) bool {
-		switch {
-		case strings.HasPrefix(contentType, "text/"):
-			return true
-		case strings.HasPrefix(contentType, "application/json"):
-			return true
-		default:
-			return false
-		}
-	}(contentType)
+// check if given `url` is from YouTube
+func isURLFromYoutube(url string) bool {
+	return slices.ContainsFunc([]string{
+		"www.youtube.com",
+		"youtu.be",
+	}, func(e string) bool {
+		return strings.Contains(url, e)
+	})
 }
 
 // convert pcm data to wav
@@ -588,7 +444,7 @@ func readFileContentAtURL(url string) (content []byte, err error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	content, err = io.ReadAll(resp.Body)
 	if err != nil {

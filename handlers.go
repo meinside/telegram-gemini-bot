@@ -205,7 +205,7 @@ func genSpeechCommandHandler(
 		}
 
 		if parent, original, err := chatMessagesFromTGMessage(b, *message); err == nil {
-			answerWithVoice(
+			if err := answerWithVoice(
 				ctx,
 				b,
 				conf,
@@ -217,7 +217,9 @@ func genSpeechCommandHandler(
 				userID,
 				username,
 				messageID,
-			)
+			); err != nil {
+				log.Printf("failed to answer with voice: %s", redactError(conf, err))
+			}
 		} else {
 			log.Printf("failed to answer with speech: %s", redactError(conf, err))
 		}

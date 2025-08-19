@@ -246,43 +246,6 @@ func sendVoice(
 	return sentMessageID, err
 }
 
-// send given blob data as a document to the chat
-func sendFile(
-	bot *tg.Bot,
-	conf config,
-	data []byte,
-	chatID int64,
-	messageID *int64,
-	caption *string,
-) (sentMessageID int64, err error) {
-	_ = bot.SendChatAction(chatID, tg.ChatActionTyping, nil)
-
-	if conf.Verbose {
-		log.Printf("[verbose] sending document to chat(%d): %d bytes of data", chatID, len(data))
-	}
-
-	options := tg.OptionsSendDocument{}
-	if messageID != nil {
-		options.SetReplyParameters(tg.ReplyParameters{
-			MessageID: *messageID,
-		})
-	}
-	if caption != nil {
-		options.SetCaption(*caption)
-	}
-	if res := bot.SendDocument(
-		chatID,
-		tg.NewInputFileFromBytes(data),
-		options,
-	); res.Ok {
-		sentMessageID = res.Result.MessageID
-	} else {
-		err = fmt.Errorf("failed to send document: %s", *res.Description)
-	}
-
-	return sentMessageID, err
-}
-
 // generate an answer to given message and send it to the chat
 func answer(
 	ctx context.Context,
@@ -306,38 +269,32 @@ func answer(
 	)
 
 	opts := &gt.GenerationOptions{
+		Tools: []*genai.Tool{
+			{
+				URLContext: &genai.URLContext{},
+			},
+		},
 		HarmBlockThreshold: conf.GoogleAIHarmBlockThreshold,
 	}
 	if withGoogleSearch {
-		opts.Tools = []*genai.Tool{
-			{
-				GoogleSearch: &genai.GoogleSearch{},
-			},
-		}
+		opts.Tools[0].GoogleSearch = &genai.GoogleSearch{}
 	}
 
 	// prompt
-	var promptText string
+	var prompts []gt.Prompt
 	promptFiles := map[string]io.Reader{}
 
 	if original != nil {
 		// text
-		promptText = original.text
-		promptFilesFromURL := [][]byte{}
-		if conf.ReplaceHTTPURLsInPrompt {
-			promptText, promptFilesFromURL = convertPromptWithURLs(conf, promptText)
-		}
+		prompts = convertPromptWithURLs(original.text)
 
 		// files
-		for i, file := range promptFilesFromURL {
-			promptFiles[fmt.Sprintf("url %d", i+1)] = bytes.NewReader(file)
-		}
 		for i, file := range original.files {
 			promptFiles[fmt.Sprintf("file %d", i+1)] = bytes.NewReader(file)
 		}
 
 		if conf.Verbose {
-			log.Printf("[verbose] will process prompt text '%s' with %d files", promptText, len(promptFiles))
+			log.Printf("[verbose] will process prompt text '%s' with %d files", original.text, len(promptFiles))
 		}
 	}
 
@@ -381,7 +338,7 @@ func answer(
 	var numTokensInput int32 = 0
 	var numTokensOutput int32 = 0
 
-	prompts := []gt.Prompt{gt.PromptFromText(promptText)}
+	// append files to prompts
 	for filename, file := range promptFiles {
 		prompts = append(prompts, gt.PromptFromFile(filename, file))
 	}
@@ -545,6 +502,14 @@ func answerWithImage(
 	)
 
 	opts := &gt.GenerationOptions{
+		// FIXME: Url Context as tool is not enabled for <image generation model>
+		/*
+			Tools: []*genai.Tool{
+				{
+					URLContext: &genai.URLContext{},
+				},
+			},
+		*/
 		HarmBlockThreshold: conf.GoogleAIHarmBlockThreshold,
 		ResponseModalities: []genai.Modality{
 			genai.ModalityText,
@@ -553,27 +518,20 @@ func answerWithImage(
 	}
 
 	// prompt
-	var promptText string
+	var prompts []gt.Prompt
 	promptFiles := map[string]io.Reader{}
 
 	if original != nil {
-		// text
-		promptFilesFromURL := [][]byte{}
-		promptText = original.text
-		if conf.ReplaceHTTPURLsInPrompt {
-			promptText, promptFilesFromURL = convertPromptWithURLs(conf, promptText)
-		}
+		// converted prompts
+		prompts = convertPromptWithURLs(original.text)
 
 		// files
-		for i, file := range promptFilesFromURL {
-			promptFiles[fmt.Sprintf("url %d", i+1)] = bytes.NewReader(file)
-		}
 		for i, file := range original.files {
 			promptFiles[fmt.Sprintf("file %d", i+1)] = bytes.NewReader(file)
 		}
 
 		if conf.Verbose {
-			log.Printf("[verbose] will process prompt text '%s' with %d files", promptText, len(promptFiles))
+			log.Printf("[verbose] will process prompt text '%s' with %d files", original.text, len(promptFiles))
 		}
 	}
 
@@ -617,7 +575,7 @@ func answerWithImage(
 	var numTokensInput int32 = 0
 	var numTokensOutput int32 = 0
 
-	prompts := []gt.Prompt{gt.PromptFromText(promptText)}
+	// append files to prompts
 	for filename, file := range promptFiles {
 		prompts = append(prompts, gt.PromptFromFile(filename, file))
 	}
@@ -766,6 +724,14 @@ func answerWithVoice(
 	)
 
 	opts := &gt.GenerationOptions{
+		// FIXME: Url Context as tool is not enabled for <speech generation model>
+		/*
+			Tools: []*genai.Tool{
+				{
+					URLContext: &genai.URLContext{},
+				},
+			},
+		*/
 		HarmBlockThreshold: conf.GoogleAIHarmBlockThreshold,
 		ResponseModalities: []genai.Modality{
 			genai.ModalityAudio,
@@ -787,16 +753,9 @@ func answerWithVoice(
 
 	if original != nil {
 		// text
-		promptFilesFromURL := [][]byte{}
 		promptText = original.text
-		if conf.ReplaceHTTPURLsInPrompt {
-			promptText, promptFilesFromURL = convertPromptWithURLs(conf, promptText)
-		}
 
 		// files
-		for i, file := range promptFilesFromURL {
-			promptFiles[fmt.Sprintf("url %d", i+1)] = bytes.NewReader(file)
-		}
 		for i, file := range original.files {
 			promptFiles[fmt.Sprintf("file %d", i+1)] = bytes.NewReader(file)
 		}
