@@ -26,7 +26,6 @@ import (
 	"github.com/meinside/version-go"
 
 	// others
-
 	"github.com/tailscale/hujson"
 )
 
@@ -167,7 +166,7 @@ func convertPromptWithURLs(
 	re := regexp.MustCompile(urlRegexp)
 	for _, url := range re.FindAllString(prompt, -1) {
 		if before, after, found := strings.Cut(remaining, url); found {
-			if isURLFromYoutube(url) {
+			if isURLFromYoutube(url) { // => replace each url with corresponding URI prompt
 				if len(before) > 0 {
 					converted = append(
 						converted,
@@ -178,10 +177,10 @@ func convertPromptWithURLs(
 					converted,
 					gt.PromptFromURI(url),
 				)
-			} else {
+			} else { // => keep the original urls as-is
 				converted = append(
 					converted,
-					gt.PromptFromText(before+after),
+					gt.PromptFromText(before+url),
 				)
 			}
 			remaining = after
