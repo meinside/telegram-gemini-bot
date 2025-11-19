@@ -299,6 +299,7 @@ func answer(
 	}
 
 	// histories (parent message)
+	var history []genai.Content = nil
 	if parent != nil {
 		// text of parent message
 		parentText := parent.text
@@ -325,8 +326,8 @@ func answer(
 			errs = append(errs, fmt.Errorf("file upload failed: %w", err))
 		}
 
-		// set history for generation options
-		opts.History = []genai.Content{
+		// history of past generations
+		history = []genai.Content{
 			{
 				Role:  string(gt.RoleModel),
 				Parts: parts,
@@ -344,135 +345,139 @@ func answer(
 	}
 
 	// generate
-	var firstMessageID *int64 = nil
-	mergedText := ""
-	if err := gtc.GenerateStreamed(
-		ctx,
-		prompts,
-		func(data gt.StreamCallbackData) {
+	if contents, err := gtc.PromptsToContents(ctx, prompts, history); err == nil {
+		var firstMessageID *int64 = nil
+		mergedText := ""
+		if err := gtc.GenerateStreamed(
+			ctx,
+			contents,
+			func(data gt.StreamCallbackData) {
+				if conf.Verbose {
+					log.Printf("[verbose] streaming answer to chat(%d): %+v", chatID, data)
+				}
+
+				// check finish reason
+				if data.FinishReason != nil && *data.FinishReason != genai.FinishReasonStop {
+					generatedText := fmt.Sprintf("<<<%s>>>", *data.FinishReason)
+					mergedText += generatedText
+
+					if firstMessageID == nil { // send the first message
+						if sentMessageID, err := sendMessage(
+							bot,
+							conf,
+							generatedText,
+							chatID,
+							&messageID,
+						); err == nil {
+							firstMessageID = &sentMessageID
+						} else {
+							errs = append(errs, fmt.Errorf("failed to send message: %w", err))
+						}
+					} else { // update the first message
+						// update the first message (append text)
+						if err := updateMessage(
+							bot,
+							conf,
+							mergedText,
+							chatID,
+							*firstMessageID,
+						); err != nil {
+							errs = append(errs, fmt.Errorf("failed to update message: %w", err))
+						}
+					}
+				}
+
+				// check stream content
+				if data.TextDelta != nil {
+					generatedText := *data.TextDelta
+					mergedText += generatedText
+
+					if firstMessageID == nil { // send the first message
+						if sentMessageID, err := sendMessage(
+							bot,
+							conf,
+							generatedText,
+							chatID,
+							&messageID,
+						); err == nil {
+							firstMessageID = &sentMessageID
+						} else {
+							errs = append(errs, fmt.Errorf("failed to send message: %w", err))
+						}
+					} else { // update the first message
+						// update the first message (append text)
+						if err := updateMessage(
+							bot,
+							conf,
+							mergedText,
+							chatID,
+							*firstMessageID,
+						); err != nil {
+							errs = append(errs, fmt.Errorf("failed to update message: %w", err))
+						}
+					}
+				} else if data.Error != nil {
+					errs = append(errs, fmt.Errorf("error from stream: %w", data.Error))
+
+					if _, err := sendMessage(
+						bot,
+						conf,
+						fmt.Sprintf("Stream error: %s", redactError(conf, data.Error)),
+						chatID,
+						nil,
+					); err != nil {
+						errs = append(errs, fmt.Errorf("failed to send error message: %w", err))
+					}
+				}
+
+				// check tokens
+				if data.NumTokens != nil {
+					if numTokensInput < data.NumTokens.Input {
+						numTokensInput = data.NumTokens.Input
+					}
+					if numTokensOutput < data.NumTokens.Output {
+						numTokensOutput = data.NumTokens.Output
+					}
+				}
+			},
+			opts,
+		); err == nil {
 			if conf.Verbose {
-				log.Printf("[verbose] streaming answer to chat(%d): %+v", chatID, data)
+				log.Printf("[verbose] streaming [%+v + %+v] ...", parent, original)
 			}
+		} else {
+			errs = append(errs, fmt.Errorf("failed to generate stream: %w", err))
+		}
 
-			// check finish reason
-			if data.FinishReason != nil && *data.FinishReason != genai.FinishReasonStop {
-				generatedText := fmt.Sprintf("<<<%s>>>", *data.FinishReason)
-				mergedText += generatedText
-
-				if firstMessageID == nil { // send the first message
-					if sentMessageID, err := sendMessage(
-						bot,
-						conf,
-						generatedText,
-						chatID,
-						&messageID,
-					); err == nil {
-						firstMessageID = &sentMessageID
-					} else {
-						errs = append(errs, fmt.Errorf("failed to send message: %w", err))
-					}
-				} else { // update the first message
-					// update the first message (append text)
-					if err := updateMessage(
-						bot,
-						conf,
-						mergedText,
-						chatID,
-						*firstMessageID,
-					); err != nil {
-						errs = append(errs, fmt.Errorf("failed to update message: %w", err))
-					}
-				}
-			}
-
-			// check stream content
-			if data.TextDelta != nil {
-				generatedText := *data.TextDelta
-				mergedText += generatedText
-
-				if firstMessageID == nil { // send the first message
-					if sentMessageID, err := sendMessage(
-						bot,
-						conf,
-						generatedText,
-						chatID,
-						&messageID,
-					); err == nil {
-						firstMessageID = &sentMessageID
-					} else {
-						errs = append(errs, fmt.Errorf("failed to send message: %w", err))
-					}
-				} else { // update the first message
-					// update the first message (append text)
-					if err := updateMessage(
-						bot,
-						conf,
-						mergedText,
-						chatID,
-						*firstMessageID,
-					); err != nil {
-						errs = append(errs, fmt.Errorf("failed to update message: %w", err))
-					}
-				}
-			} else if data.Error != nil {
-				errs = append(errs, fmt.Errorf("error from stream: %w", data.Error))
-
-				if _, err := sendMessage(
-					bot,
-					conf,
-					fmt.Sprintf("Stream error: %s", redactError(conf, data.Error)),
+		// log if it was successful or not
+		successful := (func() bool {
+			if firstMessageID != nil {
+				// leave a reaction on the first message for notifying the termination of the stream
+				if result := bot.SetMessageReaction(
 					chatID,
-					nil,
-				); err != nil {
-					errs = append(errs, fmt.Errorf("failed to send error message: %w", err))
+					*firstMessageID,
+					tg.NewMessageReactionWithEmoji("👌"),
+				); !result.Ok {
+					errs = append(errs, fmt.Errorf("failed to set message reaction: %s", *result.Description))
 				}
+				return true
 			}
-
-			// check tokens
-			if data.NumTokens != nil {
-				if numTokensInput < data.NumTokens.Input {
-					numTokensInput = data.NumTokens.Input
-				}
-				if numTokensOutput < data.NumTokens.Output {
-					numTokensOutput = data.NumTokens.Output
-				}
-			}
-		},
-		opts,
-	); err == nil {
-		if conf.Verbose {
-			log.Printf("[verbose] streaming [%+v + %+v] ...", parent, original)
-		}
+			return false
+		})()
+		savePromptAndResult(
+			db,
+			chatID,
+			userID,
+			username,
+			messagesToPrompt(parent, original),
+			uint(numTokensInput),
+			mergedText,
+			uint(numTokensOutput),
+			successful,
+		)
 	} else {
-		errs = append(errs, fmt.Errorf("failed to generate stream: %w", err))
+		errs = append(errs, fmt.Errorf("failed to convert prompts/files: %w", err))
 	}
-
-	// log if it was successful or not
-	successful := (func() bool {
-		if firstMessageID != nil {
-			// leave a reaction on the first message for notifying the termination of the stream
-			if result := bot.SetMessageReaction(
-				chatID,
-				*firstMessageID,
-				tg.NewMessageReactionWithEmoji("👌"),
-			); !result.Ok {
-				errs = append(errs, fmt.Errorf("failed to set message reaction: %s", *result.Description))
-			}
-			return true
-		}
-		return false
-	})()
-	savePromptAndResult(
-		db,
-		chatID,
-		userID,
-		username,
-		messagesToPrompt(parent, original),
-		uint(numTokensInput),
-		mergedText,
-		uint(numTokensOutput),
-		successful,
-	)
 
 	if len(errs) > 0 {
 		return errors.Join(errs...)
@@ -536,6 +541,7 @@ func answerWithImage(
 	}
 
 	// histories (parent message)
+	var history []genai.Content = nil
 	if parent != nil {
 		// text of parent message
 		parentText := parent.text
@@ -562,8 +568,8 @@ func answerWithImage(
 			errs = append(errs, fmt.Errorf("file upload failed: %w", err))
 		}
 
-		// set history for generation options
-		opts.History = []genai.Content{
+		// history for past generations
+		history = []genai.Content{
 			{
 				Role:  string(gt.RoleModel),
 				Parts: parts,
@@ -585,116 +591,120 @@ func answerWithImage(
 	}
 
 	// generate
-	resultAsText := ""
-	mergedText := ""
-	imageGenerated := false
-	successful := false
-	if generated, err := gtc.Generate(
-		ctx,
-		prompts,
-		opts,
-	); err == nil {
-		if generated.UsageMetadata != nil {
-			numTokensInput = generated.UsageMetadata.PromptTokenCount
-			numTokensOutput = generated.UsageMetadata.CandidatesTokenCount
-		}
+	if contents, err := gtc.PromptsToContents(ctx, prompts, history); err == nil {
+		resultAsText := ""
+		mergedText := ""
+		imageGenerated := false
+		successful := false
+		if generated, err := gtc.Generate(
+			ctx,
+			contents,
+			opts,
+		); err == nil {
+			if generated.UsageMetadata != nil {
+				numTokensInput = generated.UsageMetadata.PromptTokenCount
+				numTokensOutput = generated.UsageMetadata.CandidatesTokenCount
+			}
 
-	outer:
-		for _, cand := range generated.Candidates {
-			if cand.Content != nil {
-				for _, part := range cand.Content.Parts {
-					if part.InlineData != nil {
-						data := part.InlineData.Data
+		outer:
+			for _, cand := range generated.Candidates {
+				if cand.Content != nil {
+					for _, part := range cand.Content.Parts {
+						if part.InlineData != nil {
+							data := part.InlineData.Data
 
-						mimeType := mimetype.Detect(data).String()
-						if strings.HasPrefix(mimeType, "image/") {
-							imageGenerated = true
+							mimeType := mimetype.Detect(data).String()
+							if strings.HasPrefix(mimeType, "image/") {
+								imageGenerated = true
 
-							if _, e := sendPhoto(
-								bot,
-								conf,
-								data,
-								chatID,
-								&messageID,
-							); e == nil {
-								resultAsText = fmt.Sprintf("%s;%d bytes", mimeType, len(data))
-								successful = true
-								break outer
+								if _, e := sendPhoto(
+									bot,
+									conf,
+									data,
+									chatID,
+									&messageID,
+								); e == nil {
+									resultAsText = fmt.Sprintf("%s;%d bytes", mimeType, len(data))
+									successful = true
+									break outer
+								} else {
+									errs = append(errs, fmt.Errorf("failed to send image: %w", e))
+								}
 							} else {
-								errs = append(errs, fmt.Errorf("failed to send image: %w", e))
+								errs = append(errs, fmt.Errorf("non-image part was received (%s)", mimeType))
 							}
-						} else {
-							errs = append(errs, fmt.Errorf("non-image part was received (%s)", mimeType))
+						} else if len(part.Text) > 0 {
+							mergedText += part.Text
 						}
-					} else if len(part.Text) > 0 {
-						mergedText += part.Text
+					}
+				} else if cand.FinishReason != genai.FinishReasonStop {
+					if _, e := sendMessage(
+						bot,
+						conf,
+						fmt.Sprintf("Image generation failed with finish reason: %s", cand.FinishReason),
+						chatID,
+						&messageID,
+					); e != nil {
+						errs = append(errs, fmt.Errorf("failed to send error message: %w", e))
 					}
 				}
-			} else if cand.FinishReason != genai.FinishReasonStop {
-				if _, e := sendMessage(
-					bot,
-					conf,
-					fmt.Sprintf("Image generation failed with finish reason: %s", cand.FinishReason),
-					chatID,
-					&messageID,
-				); e != nil {
-					errs = append(errs, fmt.Errorf("failed to send error message: %w", e))
-				}
 			}
-		}
-		if !successful {
-			if imageGenerated {
-				if _, e := sendMessage(
-					bot,
-					conf,
-					"Successfully generated image(s), but send failed.",
-					chatID,
-					&messageID,
-				); e != nil {
-					errs = append(errs, fmt.Errorf("failed to send error message: %w", e))
-				}
-			} else {
-				if len(mergedText) > 0 {
-					mergedText = fmt.Sprintf("Image generation failed: %s", mergedText)
+			if !successful {
+				if imageGenerated {
+					if _, e := sendMessage(
+						bot,
+						conf,
+						"Successfully generated image(s), but send failed.",
+						chatID,
+						&messageID,
+					); e != nil {
+						errs = append(errs, fmt.Errorf("failed to send error message: %w", e))
+					}
 				} else {
-					mergedText = "No image was returned from API."
-				}
+					if len(mergedText) > 0 {
+						mergedText = fmt.Sprintf("Image generation failed: %s", mergedText)
+					} else {
+						mergedText = "No image was returned from API."
+					}
 
-				if _, e := sendMessage(
-					bot,
-					conf,
-					mergedText,
-					chatID,
-					&messageID,
-				); e != nil {
-					errs = append(errs, fmt.Errorf("failed to send error message: %w", e))
+					if _, e := sendMessage(
+						bot,
+						conf,
+						mergedText,
+						chatID,
+						&messageID,
+					); e != nil {
+						errs = append(errs, fmt.Errorf("failed to send error message: %w", e))
+					}
 				}
 			}
-		}
-	} else {
-		errs = append(errs, fmt.Errorf("failed to generate image: %w", err))
+		} else {
+			errs = append(errs, fmt.Errorf("failed to generate image: %w", err))
 
-		if _, e := sendMessage(
-			bot,
-			conf,
-			fmt.Sprintf("Image generation failed: %s", redactError(conf, err)),
-			chatID,
-			&messageID,
-		); e != nil {
-			errs = append(errs, fmt.Errorf("failed to send error message: %w", e))
+			if _, e := sendMessage(
+				bot,
+				conf,
+				fmt.Sprintf("Image generation failed: %s", redactError(conf, err)),
+				chatID,
+				&messageID,
+			); e != nil {
+				errs = append(errs, fmt.Errorf("failed to send error message: %w", e))
+			}
 		}
+		savePromptAndResult(
+			db,
+			chatID,
+			userID,
+			username,
+			messagesToPrompt(parent, original),
+			uint(numTokensInput),
+			resultAsText,
+			uint(numTokensOutput),
+			successful,
+		)
+	} else {
+		errs = append(errs, fmt.Errorf("failed to convert prompts/files: %w", err))
 	}
-	savePromptAndResult(
-		db,
-		chatID,
-		userID,
-		username,
-		messagesToPrompt(parent, original),
-		uint(numTokensInput),
-		resultAsText,
-		uint(numTokensOutput),
-		successful,
-	)
 
 	if len(errs) > 0 {
 		return errors.Join(errs...)
@@ -766,6 +776,7 @@ func answerWithVoice(
 	}
 
 	// histories (parent message)
+	var history []genai.Content = nil
 	if parent != nil {
 		// text of parent message
 		parentText := parent.text
@@ -792,8 +803,8 @@ func answerWithVoice(
 			errs = append(errs, fmt.Errorf("file upload failed: %w", err))
 		}
 
-		// set history for generation options
-		opts.History = []genai.Content{
+		// history of past generations
+		history = []genai.Content{
 			{
 				Role:  string(gt.RoleModel),
 				Parts: parts,
@@ -815,112 +826,116 @@ func answerWithVoice(
 	}
 
 	// generate
-	resultAsText := ""
-	successful := false
-	if generated, err := gtc.Generate(
-		ctx,
-		prompts,
-		opts,
-	); err == nil {
-		if generated.UsageMetadata != nil {
-			numTokensInput = generated.UsageMetadata.PromptTokenCount
-			numTokensOutput = generated.UsageMetadata.CandidatesTokenCount
-		}
+	if contents, err := gtc.PromptsToContents(ctx, prompts, history); err == nil {
+		resultAsText := ""
+		successful := false
+		if generated, err := gtc.Generate(
+			ctx,
+			contents,
+			opts,
+		); err == nil {
+			if generated.UsageMetadata != nil {
+				numTokensInput = generated.UsageMetadata.PromptTokenCount
+				numTokensOutput = generated.UsageMetadata.CandidatesTokenCount
+			}
 
-	outer:
-		for _, cand := range generated.Candidates {
-			if cand.Content != nil {
-				for _, part := range cand.Content.Parts {
-					if part.InlineData != nil {
-						// check codec and birtate
-						var speechCodec string
-						var bitRate int
-						for _, split := range strings.Split(part.InlineData.MIMEType, ";") {
-							if strings.HasPrefix(split, "codec=") {
-								speechCodec = split[6:]
-							} else if strings.HasPrefix(split, "rate=") {
-								bitRate, _ = strconv.Atoi(split[5:])
+		outer:
+			for _, cand := range generated.Candidates {
+				if cand.Content != nil {
+					for _, part := range cand.Content.Parts {
+						if part.InlineData != nil {
+							// check codec and birtate
+							var speechCodec string
+							var bitRate int
+							for split := range strings.SplitSeq(part.InlineData.MIMEType, ";") {
+								if strings.HasPrefix(split, "codec=") {
+									speechCodec = split[6:]
+								} else if strings.HasPrefix(split, "rate=") {
+									bitRate, _ = strconv.Atoi(split[5:])
+								}
 							}
-						}
 
-						pcmBytes := part.InlineData.Data
+							pcmBytes := part.InlineData.Data
 
-						// convert PCM to .wav,
-						if speechCodec == "pcm" && bitRate > 0 { // FIXME: only 'pcm' is supported for now
-							if wavBytes, err := pcmToWav(
-								pcmBytes,
-								bitRate,
-								wavBitDepth,
-								wavNumChannels,
-							); err == nil {
-								// convert .wav to .ogg,
-								if oggBytes, err := wavToOGG(wavBytes); err == nil {
-									if _, err = sendVoice(bot, conf, oggBytes, chatID, &messageID); err == nil {
-										resultAsText = fmt.Sprintf("%s;%d bytes", mimetype.Detect(oggBytes).String(), len(oggBytes))
-										successful = true
-										break outer
+							// convert PCM to .wav,
+							if speechCodec == "pcm" && bitRate > 0 { // FIXME: only 'pcm' is supported for now
+								if wavBytes, err := pcmToWav(
+									pcmBytes,
+									bitRate,
+									wavBitDepth,
+									wavNumChannels,
+								); err == nil {
+									// convert .wav to .ogg,
+									if oggBytes, err := wavToOGG(wavBytes); err == nil {
+										if _, err = sendVoice(bot, conf, oggBytes, chatID, &messageID); err == nil {
+											resultAsText = fmt.Sprintf("%s;%d bytes", mimetype.Detect(oggBytes).String(), len(oggBytes))
+											successful = true
+											break outer
+										} else {
+											log.Printf("failed to send speech: %s", err)
+										}
 									} else {
-										log.Printf("failed to send speech: %s", err)
+										log.Printf("failed to convert .wav to .ogg: %s", err)
 									}
 								} else {
-									log.Printf("failed to convert .wav to .ogg: %s", err)
+									log.Printf("failed to convert PCM to .wav: %s", err)
 								}
 							} else {
-								log.Printf("failed to convert PCM to .wav: %s", err)
+								errs = append(errs, fmt.Errorf("unsupported part was received (codec: %s, bitrate: %d)", speechCodec, bitRate))
+								break outer
 							}
-						} else {
-							errs = append(errs, fmt.Errorf("unsupported part was received (codec: %s, bitrate: %d)", speechCodec, bitRate))
-							break outer
 						}
 					}
+				} else if cand.FinishReason != genai.FinishReasonStop {
+					if _, e := sendMessage(
+						bot,
+						conf,
+						fmt.Sprintf("Speech generation failed with finish reason: %s", cand.FinishReason),
+						chatID,
+						&messageID,
+					); e != nil {
+						errs = append(errs, fmt.Errorf("failed to send error message: %w", e))
+					}
 				}
-			} else if cand.FinishReason != genai.FinishReasonStop {
+			}
+			if !successful {
 				if _, e := sendMessage(
 					bot,
 					conf,
-					fmt.Sprintf("Speech generation failed with finish reason: %s", cand.FinishReason),
+					`No speech was returned from API.`,
 					chatID,
 					&messageID,
 				); e != nil {
 					errs = append(errs, fmt.Errorf("failed to send error message: %w", e))
 				}
 			}
-		}
-		if !successful {
+		} else {
+			errs = append(errs, fmt.Errorf("failed to generate speech: %w", err))
+
 			if _, e := sendMessage(
 				bot,
 				conf,
-				`No speech was returned from API.`,
+				fmt.Sprintf("Speech generation failed: %s", redactError(conf, err)),
 				chatID,
 				&messageID,
 			); e != nil {
 				errs = append(errs, fmt.Errorf("failed to send error message: %w", e))
 			}
 		}
-	} else {
-		errs = append(errs, fmt.Errorf("failed to generate speech: %w", err))
-
-		if _, e := sendMessage(
-			bot,
-			conf,
-			fmt.Sprintf("Speech generation failed: %s", redactError(conf, err)),
+		savePromptAndResult(
+			db,
 			chatID,
-			&messageID,
-		); e != nil {
-			errs = append(errs, fmt.Errorf("failed to send error message: %w", e))
-		}
+			userID,
+			username,
+			messagesToPrompt(parent, original),
+			uint(numTokensInput),
+			resultAsText,
+			uint(numTokensOutput),
+			successful,
+		)
+	} else {
+		errs = append(errs, fmt.Errorf("failed to convert prompts/files: %w", err))
 	}
-	savePromptAndResult(
-		db,
-		chatID,
-		userID,
-		username,
-		messagesToPrompt(parent, original),
-		uint(numTokensInput),
-		resultAsText,
-		uint(numTokensOutput),
-		successful,
-	)
 
 	if len(errs) > 0 {
 		return errors.Join(errs...)
