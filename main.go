@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -14,7 +15,10 @@ func main() {
 	} else {
 		confFilepath := os.Args[1]
 
-		if conf, err := loadConfig(confFilepath); err == nil {
+		if conf, err := loadConfig(
+			context.TODO(),
+			confFilepath,
+		); err == nil {
 			runBot(conf)
 		} else {
 			log.Printf("failed to load config: %s", err)

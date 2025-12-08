@@ -48,6 +48,10 @@ Respond to user messages according to the following principles:
 const (
 	intervalSeconds = 1
 
+	requestTimeoutSeconds          = 30
+	longRequestTimeoutSeconds      = 180 // 3 minutes
+	ignorableRequestTimeoutSeconds = 3
+
 	cmdStart = "/start"
 
 	// general commands
@@ -152,7 +156,7 @@ func runBot(conf config) {
 	}
 	gtcImg.SetTimeoutSeconds(conf.AnswerTimeoutSeconds)
 	gtcImg.SetSystemInstructionFunc(nil)
-	defer gtcImg.Close()
+	defer func() { _ = gtcImg.Close() }()
 
 	// gemini-things client for speech generation
 	gtcSpeech, err := gt.NewClient(
@@ -166,12 +170,20 @@ func runBot(conf config) {
 	}
 	gtcSpeech.SetTimeoutSeconds(conf.AnswerTimeoutSeconds)
 	gtcSpeech.SetSystemInstructionFunc(nil)
-	defer gtcSpeech.Close()
+	defer func() { _ = gtcSpeech.Close() }()
 
-	ctx := context.Background()
+	// context for background tasks
+	ctxBg := context.Background()
 
-	_ = bot.DeleteWebhook(false) // delete webhook before polling updates
-	if b := bot.GetMe(); b.Ok {
+	// delete webhook before polling updates
+	ctxDelete, cancelDelete := context.WithTimeout(ctxBg, requestTimeoutSeconds*time.Second)
+	defer cancelDelete()
+	_ = bot.DeleteWebhook(ctxDelete, false)
+
+	// get bot info
+	ctxInfo, cancelInfo := context.WithTimeout(ctxBg, requestTimeoutSeconds*time.Second)
+	defer cancelInfo()
+	if b := bot.GetMe(ctxInfo); b.Ok {
 		log.Printf("launching bot: %s", userName(b.Result))
 
 		// database
@@ -196,7 +208,7 @@ func runBot(conf config) {
 			}
 
 			handleMessages(
-				ctx,
+				ctxBg,
 				b,
 				conf,
 				db,
@@ -206,6 +218,7 @@ func runBot(conf config) {
 				false,
 			)
 		})
+		// set media group handler
 		bot.SetMediaGroupHandler(func(
 			b *tg.Bot,
 			updates []tg.Update,
@@ -219,7 +232,7 @@ func runBot(conf config) {
 			}
 
 			handleMessages(
-				ctx,
+				ctxBg,
 				b,
 				conf,
 				db,
@@ -229,6 +242,7 @@ func runBot(conf config) {
 				false,
 			)
 		})
+		// set inline query handler
 		bot.SetInlineQueryHandler(func(
 			b *tg.Bot,
 			update tg.Update,
@@ -266,7 +280,11 @@ func runBot(conf config) {
 				results = append(results, article)
 			}
 
+			// answer inline query
+			ctxAnswer, cancelAnswer := context.WithTimeout(ctxBg, requestTimeoutSeconds*time.Second)
+			defer cancelAnswer()
 			if result := bot.AnswerInlineQuery(
+				ctxAnswer,
 				inlineQuery.ID,
 				results,
 				options,
@@ -276,32 +294,38 @@ func runBot(conf config) {
 		})
 
 		// set general command handlers
-		bot.AddCommandHandler(cmdStart, startCommandHandler(conf, allowedUsers))
-		bot.AddCommandHandler(cmdStats, statsCommandHandler(conf, db, allowedUsers))
-		bot.AddCommandHandler(cmdHelp, helpCommandHandler(conf, allowedUsers))
-		bot.AddCommandHandler(cmdPrivacy, privacyCommandHandler(conf))
+		bot.AddCommandHandler(cmdStart, startCommandHandler(ctxBg, conf, allowedUsers))
+		bot.AddCommandHandler(cmdStats, statsCommandHandler(ctxBg, conf, db, allowedUsers))
+		bot.AddCommandHandler(cmdHelp, helpCommandHandler(ctxBg, conf, allowedUsers))
+		bot.AddCommandHandler(cmdPrivacy, privacyCommandHandler(ctxBg, conf))
 
 		// set generation commands' handlers
-		bot.AddCommandHandler(cmdGenerateImage, genImageCommandHandler(ctx, conf, db, gtcImg, allowedUsers))
-		bot.AddCommandHandler(cmdGenerateSpeech, genSpeechCommandHandler(ctx, conf, db, gtcSpeech, allowedUsers))
-		bot.AddCommandHandler(cmdGenerateWithGoogleSearch, genWithGoogleSearchCommandHandler(ctx, conf, db, gtc, allowedUsers))
-		bot.SetNoMatchingCommandHandler(noSuchCommandHandler(conf, allowedUsers))
+		bot.AddCommandHandler(cmdGenerateImage, genImageCommandHandler(ctxBg, conf, db, gtcImg, allowedUsers))
+		bot.AddCommandHandler(cmdGenerateSpeech, genSpeechCommandHandler(ctxBg, conf, db, gtcSpeech, allowedUsers))
+		bot.AddCommandHandler(cmdGenerateWithGoogleSearch, genWithGoogleSearchCommandHandler(ctxBg, conf, db, gtc, allowedUsers))
+		bot.SetNoMatchingCommandHandler(noSuchCommandHandler(ctxBg, conf, allowedUsers))
 
 		// set bot commands
-		if res := bot.SetMyCommands([]tg.BotCommand{
-			{
-				Command:     cmdStats,
-				Description: descStats,
+		ctxCommands, cancelCommands := context.WithTimeout(ctxBg, requestTimeoutSeconds*time.Second)
+		defer cancelCommands()
+		if res := bot.SetMyCommands(
+			ctxCommands,
+			[]tg.BotCommand{
+				{
+					Command:     cmdStats,
+					Description: descStats,
+				},
+				{
+					Command:     cmdPrivacy,
+					Description: descPrivacy,
+				},
+				{
+					Command:     cmdHelp,
+					Description: descHelp,
+				},
 			},
-			{
-				Command:     cmdPrivacy,
-				Description: descPrivacy,
-			},
-			{
-				Command:     cmdHelp,
-				Description: descHelp,
-			},
-		}, tg.OptionsSetMyCommands{}); !res.Ok {
+			tg.OptionsSetMyCommands{},
+		); !res.Ok {
 			log.Printf("failed to set bot commands: %s", *res.Description)
 		}
 
@@ -320,6 +344,7 @@ func runBot(conf config) {
 					message := usableMessageFromUpdate(update)
 					if message != nil {
 						_, _ = sendMessage(
+							ctxBg,
 							b,
 							conf,
 							msgTypeNotSupported,

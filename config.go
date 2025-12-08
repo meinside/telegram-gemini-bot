@@ -10,8 +10,10 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"time"
 
 	// google ai
+
 	"google.golang.org/genai"
 
 	// infisical
@@ -62,16 +64,22 @@ type infisicalSetting struct {
 }
 
 // load config at given path
-func loadConfig(fpath string) (conf config, err error) {
+func loadConfig(
+	ctxBg context.Context,
+	fpath string,
+) (conf config, err error) {
 	var bytes []byte
 	if bytes, err = os.ReadFile(fpath); err == nil {
 		if bytes, err = standardizeJSON(bytes); err == nil {
 			if err = json.Unmarshal(bytes, &conf); err == nil {
 				if (conf.TelegramBotToken == nil || conf.GoogleAIAPIKey == nil) &&
 					conf.Infisical != nil {
+					ctxInfisical, cancelInfisical := context.WithTimeout(ctxBg, requestTimeoutSeconds*time.Second)
+					defer cancelInfisical()
+
 					// read token and api key from infisical
 					client := infisical.NewInfisicalClient(
-						context.TODO(),
+						ctxInfisical,
 						infisical.Config{
 							SiteUrl: "https://app.infisical.com",
 						},
