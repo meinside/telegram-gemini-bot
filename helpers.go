@@ -6,6 +6,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -32,12 +33,14 @@ import (
 const (
 	redactedString = `<REDACTED>`
 
-	defaultPromptForMedias       = "Describe provided media(s)."
-	readURLContentTimeoutSeconds = 60 // 1 minute
+	defaultPromptForMedias = `Describe provided media(s).`
 )
 
 // redactError given error for logging and/or messaing
-func redactError(conf config, err error) (redacted string) {
+func redactError(
+	conf config,
+	err error,
+) (redacted string) {
 	redacted = gt.ErrToStr(err)
 
 	if strings.Contains(redacted, *conf.GoogleAIAPIKey) {
@@ -98,6 +101,7 @@ func usableMessageFromUpdate(update tg.Update) (message *tg.Message) {
 
 // convert telegram bot message into chat messages
 func chatMessagesFromTGMessage(
+	ctxBg context.Context,
 	bot *tg.Bot,
 	message tg.Message,
 	otherGroupedMessages ...tg.Message,
@@ -107,7 +111,11 @@ func chatMessagesFromTGMessage(
 
 	// chat message 1 (parent message)
 	if replyTo != nil {
-		if chatMessage, err := convertMessage(bot, *replyTo); err == nil {
+		if chatMessage, err := convertMessage(
+			ctxBg,
+			bot,
+			*replyTo,
+		); err == nil {
 			parent = chatMessage
 		} else {
 			errs = append(errs, err)
@@ -115,7 +123,12 @@ func chatMessagesFromTGMessage(
 	}
 
 	// chat message 2 (original message)
-	if chatMessage, err := convertMessage(bot, message, otherGroupedMessages...); err == nil {
+	if chatMessage, err := convertMessage(
+		ctxBg,
+		bot,
+		message,
+		otherGroupedMessages...,
+	); err == nil {
 		original = chatMessage
 	} else {
 		errs = append(errs, err)
@@ -208,7 +221,10 @@ func isURLFromYoutube(url string) bool {
 }
 
 // convert pcm data to wav
-func pcmToWav(pcmBytes []byte, sampleRate, bitDepth, numChannels int) (converted []byte, err error) {
+func pcmToWav(
+	pcmBytes []byte,
+	sampleRate, bitDepth, numChannels int,
+) (converted []byte, err error) {
 	var buf bytes.Buffer
 
 	// wav header
@@ -314,6 +330,7 @@ func repliedToMessage(message tg.Message) *tg.Message {
 //
 // (if it was sent from bot, make it an assistant's message)
 func convertMessage(
+	ctxBg context.Context,
 	bot *tg.Bot,
 	message tg.Message,
 	otherGroupedMessages ...tg.Message,
@@ -342,7 +359,7 @@ func convertMessage(
 
 		allFiles := [][]byte{}
 		for _, msg := range allMessages {
-			if files, err := filesFromMessage(bot, msg); err == nil {
+			if files, err := filesFromMessage(ctxBg, bot, msg); err == nil {
 				allFiles = append(allFiles, files...)
 			} else {
 				return nil, err
@@ -363,6 +380,7 @@ func convertMessage(
 
 // extract file bytes from given message
 func filesFromMessage(
+	ctxBg context.Context,
 	bot *tg.Bot,
 	message tg.Message,
 ) (files [][]byte, err error) {
@@ -371,7 +389,7 @@ func filesFromMessage(
 		files = [][]byte{}
 
 		for _, photo := range message.Photo {
-			if bytes, err = readMedia(bot, "photo", photo.FileID); err == nil {
+			if bytes, err = readMedia(ctxBg, bot, "photo", photo.FileID); err == nil {
 				files = append(files, bytes)
 			} else {
 				err = fmt.Errorf("failed to read photo content: %s", err)
@@ -383,31 +401,31 @@ func filesFromMessage(
 			return files, nil
 		}
 	} else if message.HasVideo() {
-		if bytes, err = readMedia(bot, "video", message.Video.FileID); err == nil {
+		if bytes, err = readMedia(ctxBg, bot, "video", message.Video.FileID); err == nil {
 			return [][]byte{bytes}, nil
 		} else {
 			err = fmt.Errorf("failed to read video content: %s", err)
 		}
 	} else if message.HasVideoNote() {
-		if bytes, err = readMedia(bot, "video note", message.VideoNote.FileID); err == nil {
+		if bytes, err = readMedia(ctxBg, bot, "video note", message.VideoNote.FileID); err == nil {
 			return [][]byte{bytes}, nil
 		} else {
 			err = fmt.Errorf("failed to read video note content: %s", err)
 		}
 	} else if message.HasAudio() {
-		if bytes, err = readMedia(bot, "audio", message.Audio.FileID); err == nil {
+		if bytes, err = readMedia(ctxBg, bot, "audio", message.Audio.FileID); err == nil {
 			return [][]byte{bytes}, nil
 		} else {
 			err = fmt.Errorf("failed to read audio content: %s", err)
 		}
 	} else if message.HasVoice() {
-		if bytes, err = readMedia(bot, "voice", message.Voice.FileID); err == nil {
+		if bytes, err = readMedia(ctxBg, bot, "voice", message.Voice.FileID); err == nil {
 			return [][]byte{bytes}, nil
 		} else {
 			err = fmt.Errorf("failed to read voice content: %s", err)
 		}
 	} else if message.HasDocument() {
-		if bytes, err = readMedia(bot, "document", message.Document.FileID); err == nil {
+		if bytes, err = readMedia(ctxBg, bot, "document", message.Document.FileID); err == nil {
 			return [][]byte{bytes}, nil
 		} else {
 			err = fmt.Errorf("failed to read document content: %s", err)
@@ -419,32 +437,47 @@ func filesFromMessage(
 
 // read bytes from given media
 func readMedia(
+	ctxBg context.Context,
 	bot *tg.Bot,
 	mediaType, fileID string,
 ) (result []byte, err error) {
-	if res := bot.GetFile(fileID); !res.Ok {
+	ctxFile, cancelFile := context.WithTimeout(ctxBg, requestTimeoutSeconds*time.Second)
+	defer cancelFile()
+
+	if res := bot.GetFile(ctxFile, fileID); !res.Ok {
 		err = fmt.Errorf("failed to read bytes from %s: %s", mediaType, *res.Description)
 	} else {
 		fileURL := bot.GetFileURL(*res.Result)
-		result, err = readFileContentAtURL(fileURL)
+		result, err = readFileContentAtURL(ctxBg, fileURL)
 	}
 
 	return result, err
 }
 
 // read file content at given url
-func readFileContentAtURL(url string) (content []byte, err error) {
-	httpClient := http.Client{
-		Timeout: time.Second * readURLContentTimeoutSeconds,
+func readFileContentAtURL(
+	ctxBg context.Context,
+	url string,
+) (content []byte, err error) {
+	ctxRead, cancelRead := context.WithTimeout(ctxBg, longRequestTimeoutSeconds*time.Second)
+	defer cancelRead()
+
+	// generate request
+	var req *http.Request
+	req, err = http.NewRequestWithContext(ctxRead, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
 	}
 
+	// send request
 	var resp *http.Response
-	resp, err = httpClient.Get(url)
+	resp, err = http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	// read response
 	content, err = io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err

@@ -13,6 +13,7 @@ import (
 	"log"
 	"strconv"
 	"strings"
+	"time"
 
 	// google ai
 	"google.golang.org/genai"
@@ -27,7 +28,7 @@ import (
 
 // handle allowed message updates from telegram bot api
 func handleMessages(
-	ctx context.Context,
+	ctxBg context.Context,
 	bot *tg.Bot,
 	conf config,
 	db *Database,
@@ -70,13 +71,14 @@ func handleMessages(
 	var errMessage string
 	if msg := usableMessageFromUpdate(update); msg != nil {
 		if parent, original, err := chatMessagesFromTGMessage(
+			ctxBg,
 			bot,
 			*msg,
 			otherGroupedMessages...,
 		); err == nil {
 			if original != nil {
 				if e := answer(
-					ctx,
+					ctxBg,
 					bot,
 					conf,
 					db,
@@ -112,6 +114,7 @@ func handleMessages(
 	}
 
 	if _, err := sendMessage(
+		ctxBg,
 		bot,
 		conf,
 		errMessage,
@@ -124,13 +127,16 @@ func handleMessages(
 
 // send given text to the chat
 func sendMessage(
+	ctxBg context.Context,
 	bot *tg.Bot,
 	conf config,
 	message string,
 	chatID int64,
 	messageID *int64,
 ) (sentMessageID int64, err error) {
-	_ = bot.SendChatAction(chatID, tg.ChatActionTyping, nil)
+	ctxAction, cancelAction := context.WithTimeout(ctxBg, ignorableRequestTimeoutSeconds*time.Second)
+	defer cancelAction()
+	_ = bot.SendChatAction(ctxAction, chatID, tg.ChatActionTyping, nil)
 
 	if conf.Verbose {
 		log.Printf("[verbose] sending message to chat(%d): '%s'", chatID, message)
@@ -143,7 +149,10 @@ func sendMessage(
 		})
 	}
 
+	ctxSend, cancelSend := context.WithTimeout(ctxBg, requestTimeoutSeconds*time.Second)
+	defer cancelSend()
 	if res := bot.SendMessage(
+		ctxSend,
 		chatID,
 		message,
 		options,
@@ -158,22 +167,27 @@ func sendMessage(
 
 // update a message in the chat
 func updateMessage(
+	ctxBg context.Context,
 	bot *tg.Bot,
 	conf config,
 	message string,
 	chatID int64,
 	messageID int64,
 ) (err error) {
-	_ = bot.SendChatAction(chatID, tg.ChatActionTyping, nil)
+	ctx, cancel := context.WithTimeout(ctxBg, ignorableRequestTimeoutSeconds*time.Second)
+	defer cancel()
+	_ = bot.SendChatAction(ctx, chatID, tg.ChatActionTyping, nil)
 
 	if conf.Verbose {
 		log.Printf("[verbose] updating message in chat(%d): '%s'", chatID, message)
 	}
 
+	ctxEdit, cancelEdit := context.WithTimeout(ctxBg, requestTimeoutSeconds*time.Second)
+	defer cancelEdit()
 	options := tg.OptionsEditMessageText{}.
 		SetIDs(chatID, messageID)
 
-	if res := bot.EditMessageText(message, options); !res.Ok {
+	if res := bot.EditMessageText(ctxEdit, message, options); !res.Ok {
 		err = fmt.Errorf("failed to send message: %s (requested message: %s)", *res.Description, message)
 	}
 
@@ -182,18 +196,23 @@ func updateMessage(
 
 // send given blob data as a photo to the chat
 func sendPhoto(
+	ctxBg context.Context,
 	bot *tg.Bot,
 	conf config,
 	data []byte,
 	chatID int64,
 	messageID *int64,
 ) (sentMessageID int64, err error) {
-	_ = bot.SendChatAction(chatID, tg.ChatActionTyping, nil)
+	ctx, cancel := context.WithTimeout(ctxBg, ignorableRequestTimeoutSeconds*time.Second)
+	defer cancel()
+	_ = bot.SendChatAction(ctx, chatID, tg.ChatActionTyping, nil)
 
 	if conf.Verbose {
 		log.Printf("[verbose] sending photo to chat(%d): %d bytes of data", chatID, len(data))
 	}
 
+	ctxSend, cancelSend := context.WithTimeout(ctxBg, requestTimeoutSeconds*time.Second)
+	defer cancelSend()
 	options := tg.OptionsSendPhoto{}
 	if messageID != nil {
 		options.SetReplyParameters(tg.ReplyParameters{
@@ -201,6 +220,7 @@ func sendPhoto(
 		})
 	}
 	if res := bot.SendPhoto(
+		ctxSend,
 		chatID,
 		tg.NewInputFileFromBytes(data),
 		options,
@@ -215,18 +235,23 @@ func sendPhoto(
 
 // send given blob data as a voice to the chat
 func sendVoice(
+	ctxBg context.Context,
 	bot *tg.Bot,
 	conf config,
 	data []byte,
 	chatID int64,
 	messageID *int64,
 ) (sentMessageID int64, err error) {
-	_ = bot.SendChatAction(chatID, tg.ChatActionTyping, nil)
+	ctx, cancel := context.WithTimeout(ctxBg, ignorableRequestTimeoutSeconds*time.Second)
+	defer cancel()
+	_ = bot.SendChatAction(ctx, chatID, tg.ChatActionTyping, nil)
 
 	if conf.Verbose {
 		log.Printf("[verbose] sending voice to chat(%d): %d bytes of data", chatID, len(data))
 	}
 
+	ctxSend, cancelSend := context.WithTimeout(ctxBg, requestTimeoutSeconds*time.Second)
+	defer cancelSend()
 	options := tg.OptionsSendVoice{}
 	if messageID != nil {
 		options.SetReplyParameters(tg.ReplyParameters{
@@ -234,6 +259,7 @@ func sendVoice(
 		})
 	}
 	if res := bot.SendVoice(
+		ctxSend,
 		chatID,
 		tg.NewInputFileFromBytes(data),
 		options,
@@ -248,7 +274,7 @@ func sendVoice(
 
 // generate an answer to given message and send it to the chat
 func answer(
-	ctx context.Context,
+	ctxBg context.Context,
 	bot *tg.Bot,
 	conf config,
 	db *Database,
@@ -262,7 +288,10 @@ func answer(
 	errs := []error{}
 
 	// leave a reaction on the original message for confirmation
+	ctxReaction, cancelReaction := context.WithTimeout(ctxBg, ignorableRequestTimeoutSeconds*time.Second)
+	defer cancelReaction()
 	_ = bot.SetMessageReaction(
+		ctxReaction,
 		chatID,
 		messageID,
 		tg.NewMessageReactionWithEmoji("👌"),
@@ -318,7 +347,12 @@ func answer(
 		for filename, file := range parentFiles {
 			parentFilesToUpload = append(parentFilesToUpload, gt.PromptFromFile(filename, file))
 		}
-		if uploaded, err := gtc.UploadFilesAndWait(ctx, parentFilesToUpload); err == nil {
+		ctxUpload, cancelUpload := context.WithTimeout(ctxBg, longRequestTimeoutSeconds*time.Second)
+		defer cancelUpload()
+		if uploaded, err := gtc.UploadFilesAndWait(
+			ctxUpload,
+			parentFilesToUpload,
+		); err == nil {
 			for _, upload := range uploaded {
 				parts = append(parts, ptr(upload.ToPart()))
 			}
@@ -344,12 +378,21 @@ func answer(
 		prompts = append(prompts, gt.PromptFromFile(filename, file))
 	}
 
-	// generate
-	if contents, err := gtc.PromptsToContents(ctx, prompts, history); err == nil {
+	// convert prompts to contents for generation
+	ctxContents, cancelContents := context.WithTimeout(ctxBg, longRequestTimeoutSeconds*time.Second)
+	defer cancelContents()
+	if contents, err := gtc.PromptsToContents(
+		ctxContents,
+		prompts,
+		history,
+	); err == nil {
+		// generate
+		ctxGenerate, cancelGenerate := context.WithTimeout(ctxBg, longRequestTimeoutSeconds*time.Second)
+		defer cancelGenerate()
 		var firstMessageID *int64 = nil
 		mergedText := ""
 		if err := gtc.GenerateStreamed(
-			ctx,
+			ctxGenerate,
 			contents,
 			func(data gt.StreamCallbackData) {
 				if conf.Verbose {
@@ -363,6 +406,7 @@ func answer(
 
 					if firstMessageID == nil { // send the first message
 						if sentMessageID, err := sendMessage(
+							ctxBg,
 							bot,
 							conf,
 							generatedText,
@@ -376,6 +420,7 @@ func answer(
 					} else { // update the first message
 						// update the first message (append text)
 						if err := updateMessage(
+							ctxBg,
 							bot,
 							conf,
 							mergedText,
@@ -394,6 +439,7 @@ func answer(
 
 					if firstMessageID == nil { // send the first message
 						if sentMessageID, err := sendMessage(
+							ctxBg,
 							bot,
 							conf,
 							generatedText,
@@ -407,6 +453,7 @@ func answer(
 					} else { // update the first message
 						// update the first message (append text)
 						if err := updateMessage(
+							ctxBg,
 							bot,
 							conf,
 							mergedText,
@@ -420,6 +467,7 @@ func answer(
 					errs = append(errs, fmt.Errorf("error from stream: %w", data.Error))
 
 					if _, err := sendMessage(
+						ctxBg,
 						bot,
 						conf,
 						fmt.Sprintf("Stream error: %s", redactError(conf, data.Error)),
@@ -453,7 +501,10 @@ func answer(
 		successful := (func() bool {
 			if firstMessageID != nil {
 				// leave a reaction on the first message for notifying the termination of the stream
+				ctxReaction, cancelReaction := context.WithTimeout(ctxBg, requestTimeoutSeconds*time.Second)
+				defer cancelReaction()
 				if result := bot.SetMessageReaction(
+					ctxReaction,
 					chatID,
 					*firstMessageID,
 					tg.NewMessageReactionWithEmoji("👌"),
@@ -487,7 +538,7 @@ func answer(
 
 // generate an image with given message and send it to the chat
 func answerWithImage(
-	ctx context.Context,
+	ctxBg context.Context,
 	bot *tg.Bot,
 	conf config,
 	db *Database,
@@ -500,7 +551,10 @@ func answerWithImage(
 	errs := []error{}
 
 	// leave a reaction on the original message for confirmation
+	ctxReaction, cancelReaction := context.WithTimeout(ctxBg, ignorableRequestTimeoutSeconds*time.Second)
+	defer cancelReaction()
 	_ = bot.SetMessageReaction(
+		ctxReaction,
 		chatID,
 		messageID,
 		tg.NewMessageReactionWithEmoji("👌"),
@@ -560,7 +614,12 @@ func answerWithImage(
 		for filename, file := range parentFiles {
 			parentFilesToUpload = append(parentFilesToUpload, gt.PromptFromFile(filename, file))
 		}
-		if uploaded, err := gtc.UploadFilesAndWait(ctx, parentFilesToUpload); err == nil {
+		ctxUpload, cancelUpload := context.WithTimeout(ctxBg, longRequestTimeoutSeconds*time.Second)
+		defer cancelUpload()
+		if uploaded, err := gtc.UploadFilesAndWait(
+			ctxUpload,
+			parentFilesToUpload,
+		); err == nil {
 			for _, upload := range uploaded {
 				parts = append(parts, ptr(upload.ToPart()))
 			}
@@ -590,14 +649,23 @@ func answerWithImage(
 		log.Printf("[verbose] generating image [%+v] ...", original)
 	}
 
-	// generate
-	if contents, err := gtc.PromptsToContents(ctx, prompts, history); err == nil {
+	// convert prompts to contents
+	ctxContents, cancelContents := context.WithTimeout(ctxBg, longRequestTimeoutSeconds*time.Second)
+	defer cancelContents()
+	if contents, err := gtc.PromptsToContents(
+		ctxContents,
+		prompts,
+		history,
+	); err == nil {
+		// generate
 		resultAsText := ""
 		mergedText := ""
 		imageGenerated := false
 		successful := false
+		ctxGenerate, cancelGenerate := context.WithTimeout(ctxBg, longRequestTimeoutSeconds*time.Second)
+		defer cancelGenerate()
 		if generated, err := gtc.Generate(
-			ctx,
+			ctxGenerate,
 			contents,
 			opts,
 		); err == nil {
@@ -618,6 +686,7 @@ func answerWithImage(
 								imageGenerated = true
 
 								if _, e := sendPhoto(
+									ctxBg,
 									bot,
 									conf,
 									data,
@@ -639,6 +708,7 @@ func answerWithImage(
 					}
 				} else if cand.FinishReason != genai.FinishReasonStop {
 					if _, e := sendMessage(
+						ctxBg,
 						bot,
 						conf,
 						fmt.Sprintf("Image generation failed with finish reason: %s", cand.FinishReason),
@@ -652,6 +722,7 @@ func answerWithImage(
 			if !successful {
 				if imageGenerated {
 					if _, e := sendMessage(
+						ctxBg,
 						bot,
 						conf,
 						"Successfully generated image(s), but send failed.",
@@ -668,6 +739,7 @@ func answerWithImage(
 					}
 
 					if _, e := sendMessage(
+						ctxBg,
 						bot,
 						conf,
 						mergedText,
@@ -682,6 +754,7 @@ func answerWithImage(
 			errs = append(errs, fmt.Errorf("failed to generate image: %w", err))
 
 			if _, e := sendMessage(
+				ctxBg,
 				bot,
 				conf,
 				fmt.Sprintf("Image generation failed: %s", redactError(conf, err)),
@@ -714,7 +787,7 @@ func answerWithImage(
 
 // generate a speech with given message and send it to the chat
 func answerWithVoice(
-	ctx context.Context,
+	ctxBg context.Context,
 	bot *tg.Bot,
 	conf config,
 	db *Database,
@@ -727,7 +800,10 @@ func answerWithVoice(
 	errs := []error{}
 
 	// leave a reaction on the original message for confirmation
+	ctxReaction, cancelReaction := context.WithTimeout(ctxBg, ignorableRequestTimeoutSeconds*time.Second)
+	defer cancelReaction()
 	_ = bot.SetMessageReaction(
+		ctxReaction,
 		chatID,
 		messageID,
 		tg.NewMessageReactionWithEmoji("👌"),
@@ -795,7 +871,12 @@ func answerWithVoice(
 		for filename, file := range parentFiles {
 			parentFilesToUpload = append(parentFilesToUpload, gt.PromptFromFile(filename, file))
 		}
-		if uploaded, err := gtc.UploadFilesAndWait(ctx, parentFilesToUpload); err == nil {
+		ctxUpload, cancelUpload := context.WithTimeout(ctxBg, longRequestTimeoutSeconds*time.Second)
+		defer cancelUpload()
+		if uploaded, err := gtc.UploadFilesAndWait(
+			ctxUpload,
+			parentFilesToUpload,
+		); err == nil {
 			for _, upload := range uploaded {
 				parts = append(parts, ptr(upload.ToPart()))
 			}
@@ -825,12 +906,21 @@ func answerWithVoice(
 		log.Printf("[verbose] generating speech [%+v] ...", original)
 	}
 
-	// generate
-	if contents, err := gtc.PromptsToContents(ctx, prompts, history); err == nil {
+	// convert prompts to contents
+	ctxContents, cancelContents := context.WithTimeout(ctxBg, longRequestTimeoutSeconds*time.Second)
+	defer cancelContents()
+	if contents, err := gtc.PromptsToContents(
+		ctxContents,
+		prompts,
+		history,
+	); err == nil {
+		// generate
 		resultAsText := ""
 		successful := false
+		ctxGenerate, cancelGenerate := context.WithTimeout(ctxBg, longRequestTimeoutSeconds*time.Second)
+		defer cancelGenerate()
 		if generated, err := gtc.Generate(
-			ctx,
+			ctxGenerate,
 			contents,
 			opts,
 		); err == nil {
@@ -867,7 +957,14 @@ func answerWithVoice(
 								); err == nil {
 									// convert .wav to .ogg,
 									if oggBytes, err := wavToOGG(wavBytes); err == nil {
-										if _, err = sendVoice(bot, conf, oggBytes, chatID, &messageID); err == nil {
+										if _, err = sendVoice(
+											ctxBg,
+											bot,
+											conf,
+											oggBytes,
+											chatID,
+											&messageID,
+										); err == nil {
 											resultAsText = fmt.Sprintf("%s;%d bytes", mimetype.Detect(oggBytes).String(), len(oggBytes))
 											successful = true
 											break outer
@@ -888,6 +985,7 @@ func answerWithVoice(
 					}
 				} else if cand.FinishReason != genai.FinishReasonStop {
 					if _, e := sendMessage(
+						ctxBg,
 						bot,
 						conf,
 						fmt.Sprintf("Speech generation failed with finish reason: %s", cand.FinishReason),
@@ -900,6 +998,7 @@ func answerWithVoice(
 			}
 			if !successful {
 				if _, e := sendMessage(
+					ctxBg,
 					bot,
 					conf,
 					`No speech was returned from API.`,
@@ -913,6 +1012,7 @@ func answerWithVoice(
 			errs = append(errs, fmt.Errorf("failed to generate speech: %w", err))
 
 			if _, e := sendMessage(
+				ctxBg,
 				bot,
 				conf,
 				fmt.Sprintf("Speech generation failed: %s", redactError(conf, err)),

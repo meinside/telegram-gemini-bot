@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"time"
 
 	// my libraries
 	gt "github.com/meinside/gemini-things-go"
@@ -16,6 +17,7 @@ import (
 
 // return a /start command handler
 func startCommandHandler(
+	ctxBg context.Context,
 	conf config,
 	allowedUsers map[string]bool,
 ) func(b *tg.Bot, update tg.Update, args string) {
@@ -33,12 +35,15 @@ func startCommandHandler(
 
 		chatID := message.Chat.ID
 
-		_, _ = sendMessage(b, conf, msgStart, chatID, nil)
+		ctxSend, cancelSend := context.WithTimeout(ctxBg, requestTimeoutSeconds*time.Second)
+		defer cancelSend()
+		_, _ = sendMessage(ctxSend, b, conf, msgStart, chatID, nil)
 	}
 }
 
 // return a /stats command handler
 func statsCommandHandler(
+	ctxBg context.Context,
 	conf config,
 	db *Database,
 	allowedUsers map[string]bool,
@@ -58,12 +63,13 @@ func statsCommandHandler(
 		chatID := message.Chat.ID
 		messageID := message.MessageID
 
-		_, _ = sendMessage(b, conf, retrieveStats(db), chatID, &messageID)
+		_, _ = sendMessage(ctxBg, b, conf, retrieveStats(db), chatID, &messageID)
 	}
 }
 
 // return a /help command handler
 func helpCommandHandler(
+	ctxBg context.Context,
 	conf config,
 	allowedUsers map[string]bool,
 ) func(b *tg.Bot, update tg.Update, args string) {
@@ -82,12 +88,13 @@ func helpCommandHandler(
 		chatID := message.Chat.ID
 		messageID := message.MessageID
 
-		_, _ = sendMessage(b, conf, helpMessage(conf), chatID, &messageID)
+		_, _ = sendMessage(ctxBg, b, conf, helpMessage(conf), chatID, &messageID)
 	}
 }
 
 // return a /privacy command handler
 func privacyCommandHandler(
+	ctxBg context.Context,
 	conf config,
 ) func(b *tg.Bot, update tg.Update, args string) {
 	return func(b *tg.Bot, update tg.Update, _ string) {
@@ -100,13 +107,13 @@ func privacyCommandHandler(
 		chatID := message.Chat.ID
 		messageID := message.MessageID
 
-		_, _ = sendMessage(b, conf, msgPrivacy, chatID, &messageID)
+		_, _ = sendMessage(ctxBg, b, conf, msgPrivacy, chatID, &messageID)
 	}
 }
 
 // return a /image command handler
 func genImageCommandHandler(
-	ctx context.Context,
+	ctxBg context.Context,
 	conf config,
 	db *Database,
 	gtc *gt.Client,
@@ -132,6 +139,7 @@ func genImageCommandHandler(
 		// handle empty `args`
 		if len(args) <= 0 {
 			if _, err := sendMessage(
+				ctxBg,
 				b,
 				conf,
 				msgPromptNotGiven,
@@ -143,9 +151,9 @@ func genImageCommandHandler(
 			return
 		}
 
-		if parent, original, err := chatMessagesFromTGMessage(b, *message); err == nil {
+		if parent, original, err := chatMessagesFromTGMessage(ctxBg, b, *message); err == nil {
 			if err := answerWithImage(
-				ctx,
+				ctxBg,
 				b,
 				conf,
 				db,
@@ -167,7 +175,7 @@ func genImageCommandHandler(
 
 // return a /speech command handler
 func genSpeechCommandHandler(
-	ctx context.Context,
+	ctxBg context.Context,
 	conf config,
 	db *Database,
 	gtc *gt.Client,
@@ -193,6 +201,7 @@ func genSpeechCommandHandler(
 		// handle empty `args`
 		if len(args) <= 0 {
 			if _, err := sendMessage(
+				ctxBg,
 				b,
 				conf,
 				msgPromptNotGiven,
@@ -204,9 +213,9 @@ func genSpeechCommandHandler(
 			return
 		}
 
-		if parent, original, err := chatMessagesFromTGMessage(b, *message); err == nil {
+		if parent, original, err := chatMessagesFromTGMessage(ctxBg, b, *message); err == nil {
 			if err := answerWithVoice(
-				ctx,
+				ctxBg,
 				b,
 				conf,
 				db,
@@ -228,7 +237,7 @@ func genSpeechCommandHandler(
 
 // return a /google command handler
 func genWithGoogleSearchCommandHandler(
-	ctx context.Context,
+	ctxBg context.Context,
 	conf config,
 	db *Database,
 	gtc *gt.Client,
@@ -252,6 +261,7 @@ func genWithGoogleSearchCommandHandler(
 		// handle empty `args`
 		if len(args) <= 0 {
 			if _, err := sendMessage(
+				ctxBg,
 				b,
 				conf,
 				msgPromptNotGiven,
@@ -264,7 +274,7 @@ func genWithGoogleSearchCommandHandler(
 		}
 
 		handleMessages(
-			ctx,
+			ctxBg,
 			b,
 			conf,
 			db,
@@ -278,6 +288,7 @@ func genWithGoogleSearchCommandHandler(
 
 // return a 'no such command' handler
 func noSuchCommandHandler(
+	ctxBg context.Context,
 	conf config,
 	allowedUsers map[string]bool,
 ) func(b *tg.Bot, update tg.Update, cmd, args string) {
@@ -296,6 +307,6 @@ func noSuchCommandHandler(
 		chatID := message.Chat.ID
 		messageID := message.MessageID
 
-		_, _ = sendMessage(b, conf, fmt.Sprintf(msgCmdNotSupported, cmd), chatID, &messageID)
+		_, _ = sendMessage(ctxBg, b, conf, fmt.Sprintf(msgCmdNotSupported, cmd), chatID, &messageID)
 	}
 }
