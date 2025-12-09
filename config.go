@@ -146,7 +146,7 @@ func loadConfig(
 					conf.GoogleAIHarmBlockThreshold = ptr(defaultAIHarmBlockThreshold)
 				}
 				if conf.AnswerTimeoutSeconds <= 0 {
-					conf.AnswerTimeoutSeconds = defaultAnswerTimeoutSeconds
+					conf.AnswerTimeoutSeconds = longRequestTimeoutSeconds
 				}
 
 				// check the existence of essential values
