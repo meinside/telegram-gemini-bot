@@ -347,7 +347,7 @@ func answer(
 		for filename, file := range parentFiles {
 			parentFilesToUpload = append(parentFilesToUpload, gt.PromptFromFile(filename, file))
 		}
-		ctxUpload, cancelUpload := context.WithTimeout(ctxBg, longRequestTimeoutSeconds*time.Second)
+		ctxUpload, cancelUpload := context.WithTimeout(ctxBg, time.Duration(conf.AnswerTimeoutSeconds)*time.Second)
 		defer cancelUpload()
 		if uploaded, err := gtc.UploadFilesAndWait(
 			ctxUpload,
@@ -379,7 +379,7 @@ func answer(
 	}
 
 	// convert prompts to contents for generation
-	ctxContents, cancelContents := context.WithTimeout(ctxBg, longRequestTimeoutSeconds*time.Second)
+	ctxContents, cancelContents := context.WithTimeout(ctxBg, time.Duration(conf.AnswerTimeoutSeconds)*time.Second)
 	defer cancelContents()
 	if contents, err := gtc.PromptsToContents(
 		ctxContents,
@@ -387,7 +387,7 @@ func answer(
 		history,
 	); err == nil {
 		// generate
-		ctxGenerate, cancelGenerate := context.WithTimeout(ctxBg, longRequestTimeoutSeconds*time.Second)
+		ctxGenerate, cancelGenerate := context.WithTimeout(ctxBg, time.Duration(conf.AnswerTimeoutSeconds)*time.Second)
 		defer cancelGenerate()
 		var firstMessageID *int64 = nil
 		mergedText := ""

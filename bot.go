@@ -95,8 +95,6 @@ const (
 https://github.com/meinside/telegram-gemini-bot/raw/master/PRIVACY.md`
 	msgPromptNotGiven = `Prompt was not given.`
 
-	defaultAnswerTimeoutSeconds = 180 // 3 minutes
-
 	// for replacing URLs in prompt to body texts
 	urlRegexp = `https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)`
 )
@@ -134,7 +132,6 @@ func runBot(conf config) {
 
 		os.Exit(1)
 	}
-	gtc.SetTimeoutSeconds(conf.AnswerTimeoutSeconds)
 	gtc.SetSystemInstructionFunc(func() string {
 		if conf.SystemInstruction == nil {
 			return defaultSystemInstruction()
@@ -154,7 +151,6 @@ func runBot(conf config) {
 
 		os.Exit(1)
 	}
-	gtcImg.SetTimeoutSeconds(conf.AnswerTimeoutSeconds)
 	gtcImg.SetSystemInstructionFunc(nil)
 	defer func() { _ = gtcImg.Close() }()
 
@@ -168,7 +164,6 @@ func runBot(conf config) {
 
 		os.Exit(1)
 	}
-	gtcSpeech.SetTimeoutSeconds(conf.AnswerTimeoutSeconds)
 	gtcSpeech.SetSystemInstructionFunc(nil)
 	defer func() { _ = gtcSpeech.Close() }()
 
