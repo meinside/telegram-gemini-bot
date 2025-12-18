@@ -391,110 +391,98 @@ func answer(
 		defer cancelGenerate()
 		var firstMessageID *int64 = nil
 		mergedText := ""
-		if err := gtc.GenerateStreamed(
+		for it, err := range gtc.GenerateStreamIterated(
 			ctxGenerate,
 			contents,
-			func(data gt.StreamCallbackData) {
-				if conf.Verbose {
-					log.Printf("[verbose] streaming answer to chat(%d): %+v", chatID, data)
-				}
-
-				// check finish reason
-				if data.FinishReason != nil && *data.FinishReason != genai.FinishReasonStop {
-					generatedText := fmt.Sprintf("<<<%s>>>", *data.FinishReason)
-					mergedText += generatedText
-
-					if firstMessageID == nil { // send the first message
-						if sentMessageID, err := sendMessage(
-							ctxBg,
-							bot,
-							conf,
-							generatedText,
-							chatID,
-							&messageID,
-						); err == nil {
-							firstMessageID = &sentMessageID
-						} else {
-							errs = append(errs, fmt.Errorf("failed to send message: %w", err))
-						}
-					} else { // update the first message
-						// update the first message (append text)
-						if err := updateMessage(
-							ctxBg,
-							bot,
-							conf,
-							mergedText,
-							chatID,
-							*firstMessageID,
-						); err != nil {
-							errs = append(errs, fmt.Errorf("failed to update message: %w", err))
-						}
-					}
-				}
-
-				// check stream content
-				if data.TextDelta != nil {
-					generatedText := *data.TextDelta
-					mergedText += generatedText
-
-					if firstMessageID == nil { // send the first message
-						if sentMessageID, err := sendMessage(
-							ctxBg,
-							bot,
-							conf,
-							generatedText,
-							chatID,
-							&messageID,
-						); err == nil {
-							firstMessageID = &sentMessageID
-						} else {
-							errs = append(errs, fmt.Errorf("failed to send message: %w", err))
-						}
-					} else { // update the first message
-						// update the first message (append text)
-						if err := updateMessage(
-							ctxBg,
-							bot,
-							conf,
-							mergedText,
-							chatID,
-							*firstMessageID,
-						); err != nil {
-							errs = append(errs, fmt.Errorf("failed to update message: %w", err))
-						}
-					}
-				} else if data.Error != nil {
-					errs = append(errs, fmt.Errorf("error from stream: %w", data.Error))
-
-					if _, err := sendMessage(
-						ctxBg,
-						bot,
-						conf,
-						fmt.Sprintf("Stream error: %s", redactError(conf, data.Error)),
-						chatID,
-						nil,
-					); err != nil {
-						errs = append(errs, fmt.Errorf("failed to send error message: %w", err))
-					}
-				}
-
-				// check tokens
-				if data.NumTokens != nil {
-					if numTokensInput < data.NumTokens.Input {
-						numTokensInput = data.NumTokens.Input
-					}
-					if numTokensOutput < data.NumTokens.Output {
-						numTokensOutput = data.NumTokens.Output
-					}
-				}
-			},
 			opts,
-		); err == nil {
-			if conf.Verbose {
-				log.Printf("[verbose] streaming [%+v + %+v] ...", parent, original)
+		) {
+			if err != nil {
+				errs = append(errs, fmt.Errorf("failed to generate stream: %w", err))
+			} else {
+				if conf.Verbose {
+					log.Printf("[verbose] streaming answer to chat(%d): %+v", chatID, it)
+				}
+
+				for _, candidate := range it.Candidates {
+					if candidate.Content != nil {
+						for _, part := range candidate.Content.Parts {
+							// check stream content
+							if part.Text != "" {
+								generatedText := part.Text
+								mergedText += generatedText
+
+								if firstMessageID == nil { // send the first message
+									if sentMessageID, err := sendMessage(
+										ctxBg,
+										bot,
+										conf,
+										generatedText,
+										chatID,
+										&messageID,
+									); err == nil {
+										firstMessageID = &sentMessageID
+									} else {
+										errs = append(errs, fmt.Errorf("failed to send message: %w", err))
+									}
+								} else { // update the first message
+									// update the first message (append text)
+									if err := updateMessage(
+										ctxBg,
+										bot,
+										conf,
+										mergedText,
+										chatID,
+										*firstMessageID,
+									); err != nil {
+										errs = append(errs, fmt.Errorf("failed to update message: %w", err))
+									}
+								}
+							}
+						}
+					} else if candidate.FinishReason != genai.FinishReasonStop {
+						// check finish reason
+						generatedText := fmt.Sprintf("<<<%s>>>", candidate.FinishReason)
+						mergedText += generatedText
+
+						if firstMessageID == nil { // send the first message
+							if sentMessageID, err := sendMessage(
+								ctxBg,
+								bot,
+								conf,
+								generatedText,
+								chatID,
+								&messageID,
+							); err == nil {
+								firstMessageID = &sentMessageID
+							} else {
+								errs = append(errs, fmt.Errorf("failed to send message: %w", err))
+							}
+						} else { // update the first message
+							// update the first message (append text)
+							if err := updateMessage(
+								ctxBg,
+								bot,
+								conf,
+								mergedText,
+								chatID,
+								*firstMessageID,
+							); err != nil {
+								errs = append(errs, fmt.Errorf("failed to update message: %w", err))
+							}
+						}
+					}
+
+					// check tokens
+					if it.UsageMetadata != nil {
+						if numTokensInput < it.UsageMetadata.PromptTokenCount {
+							numTokensInput = it.UsageMetadata.PromptTokenCount
+						}
+						if numTokensOutput < it.UsageMetadata.CandidatesTokenCount {
+							numTokensOutput = it.UsageMetadata.CandidatesTokenCount
+						}
+					}
+				}
 			}
-		} else {
-			errs = append(errs, fmt.Errorf("failed to generate stream: %w", err))
 		}
 
 		// log if it was successful or not
