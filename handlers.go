@@ -173,6 +173,68 @@ func genImageCommandHandler(
 	}
 }
 
+// return a /video command handler
+func genVideoCommandHandler(
+	ctxBg context.Context,
+	conf config,
+	db *Database,
+	gtc *gt.Client,
+	allowedUsers map[string]bool,
+) func(b *tg.Bot, update tg.Update, args string) {
+	return func(b *tg.Bot, update tg.Update, args string) {
+		if !isAllowed(update, allowedUsers) {
+			log.Printf("message not allowed: %s", userNameFromUpdate(update))
+			return
+		}
+
+		message := usableMessageFromUpdate(update)
+		if message == nil {
+			log.Printf("no usable message from update.")
+			return
+		}
+
+		chatID := message.Chat.ID
+		userID := message.From.ID
+		messageID := message.MessageID
+		username := userNameFromUpdate(update)
+
+		// handle empty `args`
+		if len(args) <= 0 {
+			if _, err := sendMessage(
+				ctxBg,
+				b,
+				conf,
+				msgPromptNotGiven,
+				chatID,
+				&messageID,
+			); err != nil {
+				log.Printf("failed to send error message: %s", redactError(conf, err))
+			}
+			return
+		}
+
+		if parent, original, err := chatMessagesFromTGMessage(ctxBg, b, *message); err == nil {
+			if err := answerWithVideo(
+				ctxBg,
+				b,
+				conf,
+				db,
+				gtc,
+				parent,
+				original,
+				chatID,
+				userID,
+				username,
+				messageID,
+			); err != nil {
+				log.Printf("failed to answer with video: %s", redactError(conf, err))
+			}
+		} else {
+			log.Printf("failed to get chat message from telegram message: %s", redactError(conf, err))
+		}
+	}
+}
+
 // return a /speech command handler
 func genSpeechCommandHandler(
 	ctxBg context.Context,

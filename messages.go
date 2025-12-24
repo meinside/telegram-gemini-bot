@@ -233,6 +233,45 @@ func sendPhoto(
 	return sentMessageID, err
 }
 
+// send given blob data as a video to the chat
+func sendVideo(
+	ctxBg context.Context,
+	bot *tg.Bot,
+	conf config,
+	data []byte,
+	chatID int64,
+	messageID *int64,
+) (sentMessageID int64, err error) {
+	ctx, cancel := context.WithTimeout(ctxBg, ignorableRequestTimeoutSeconds*time.Second)
+	defer cancel()
+	_ = bot.SendChatAction(ctx, chatID, tg.ChatActionTyping, nil)
+
+	if conf.Verbose {
+		log.Printf("[verbose] sending video to chat(%d): %d bytes of data", chatID, len(data))
+	}
+
+	ctxSend, cancelSend := context.WithTimeout(ctxBg, requestTimeoutSeconds*time.Second)
+	defer cancelSend()
+	options := tg.OptionsSendVideo{}
+	if messageID != nil {
+		options.SetReplyParameters(tg.ReplyParameters{
+			MessageID: *messageID,
+		})
+	}
+	if res := bot.SendVideo(
+		ctxSend,
+		chatID,
+		tg.NewInputFileFromBytes(data),
+		options,
+	); res.Ok {
+		sentMessageID = res.Result.MessageID
+	} else {
+		err = fmt.Errorf("failed to send video: %s", *res.Description)
+	}
+
+	return sentMessageID, err
+}
+
 // send given blob data as a voice to the chat
 func sendVoice(
 	ctxBg context.Context,
@@ -744,6 +783,266 @@ func answerWithImage(
 				bot,
 				conf,
 				fmt.Sprintf("Image generation failed: %s", redactError(conf, err)),
+				chatID,
+				&messageID,
+			); e != nil {
+				errs = append(errs, fmt.Errorf("failed to send error message: %w", e))
+			}
+		}
+		savePromptAndResult(
+			db,
+			chatID,
+			userID,
+			username,
+			messagesToPrompt(parent, original),
+			uint(numTokensInput),
+			resultAsText,
+			uint(numTokensOutput),
+			successful,
+		)
+	} else {
+		errs = append(errs, fmt.Errorf("failed to convert prompts/files: %w", err))
+	}
+
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
+	return nil
+}
+
+// generate an video with given message and send it to the chat
+func answerWithVideo(
+	ctxBg context.Context,
+	bot *tg.Bot,
+	conf config,
+	db *Database,
+	gtc *gt.Client,
+	parent, original *chatMessage,
+	chatID, userID int64,
+	username string,
+	messageID int64,
+) error {
+	errs := []error{}
+
+	// leave a reaction on the original message for confirmation
+	ctxReaction, cancelReaction := context.WithTimeout(ctxBg, ignorableRequestTimeoutSeconds*time.Second)
+	defer cancelReaction()
+	_ = bot.SetMessageReaction(
+		ctxReaction,
+		chatID,
+		messageID,
+		tg.NewMessageReactionWithEmoji("👌"),
+	)
+
+	opts := &genai.GenerateVideosConfig{
+		// FIXME: Url Context as tool is not enabled for <video generation model>
+		/*
+			Tools: []*genai.Tool{
+				{
+					URLContext: &genai.URLContext{},
+				},
+			},
+		*/
+	}
+
+	// prompt
+	var prompts []gt.Prompt
+	promptFiles := map[string]io.Reader{}
+
+	if original != nil {
+		// converted prompts
+		prompts = convertPromptWithURLs(original.text)
+
+		// files
+		for i, file := range original.files {
+			promptFiles[fmt.Sprintf("file %d", i+1)] = bytes.NewReader(file)
+		}
+
+		if conf.Verbose {
+			log.Printf("[verbose] will process prompt text '%s' with %d files", original.text, len(promptFiles))
+		}
+	}
+
+	// histories (parent message)
+	var history []genai.Content = nil
+	if parent != nil {
+		// text of parent message
+		parentText := parent.text
+		parts := []*genai.Part{
+			genai.NewPartFromText(parentText),
+		}
+
+		// files of parent message
+		parentFiles := map[string]io.Reader{}
+		for i, file := range parent.files {
+			parentFiles[fmt.Sprintf("file %d", i+1)] = bytes.NewReader(file)
+		}
+
+		// upload files and wait
+		parentFilesToUpload := []gt.Prompt{}
+		for filename, file := range parentFiles {
+			parentFilesToUpload = append(parentFilesToUpload, gt.PromptFromFile(filename, file))
+		}
+		ctxUpload, cancelUpload := context.WithTimeout(ctxBg, longRequestTimeoutSeconds*time.Second)
+		defer cancelUpload()
+		if uploaded, err := gtc.UploadFilesAndWait(
+			ctxUpload,
+			parentFilesToUpload,
+		); err == nil {
+			for _, upload := range uploaded {
+				parts = append(parts, ptr(upload.ToPart()))
+			}
+		} else {
+			errs = append(errs, fmt.Errorf("file upload failed: %w", err))
+		}
+
+		// history for past generations
+		history = []genai.Content{
+			{
+				Role:  string(gt.RoleModel),
+				Parts: parts,
+			},
+		}
+	}
+
+	// number of tokens for logging
+	var numTokensInput int32 = 0
+	var numTokensOutput int32 = 0
+
+	// append files to prompts
+	for filename, file := range promptFiles {
+		prompts = append(prompts, gt.PromptFromFile(filename, file))
+	}
+
+	if conf.Verbose {
+		log.Printf("[verbose] generating video [%+v] ...", original)
+	}
+
+	// convert prompts to contents
+	ctxContents, cancelContents := context.WithTimeout(ctxBg, longRequestTimeoutSeconds*time.Second)
+	defer cancelContents()
+	if contents, err := gtc.PromptsToContents(
+		ctxContents,
+		prompts,
+		history,
+	); err == nil {
+		// get `prompt`, `image`, `video` from `prompts`
+		var prompt *string
+		var image *genai.Image
+		var video *genai.Video
+		for _, content := range contents {
+			for _, part := range content.Parts {
+				if part.Text != "" {
+					if prompt == nil { // take the first prompt text,
+						prompt = ptr(part.Text)
+					}
+				} else if part.FileData != nil {
+					if strings.HasPrefix(part.FileData.MIMEType, "image/") {
+						if image == nil { // take the first image,
+							image = &genai.Image{
+								GCSURI:   part.FileData.FileURI,
+								MIMEType: part.FileData.MIMEType,
+							}
+						}
+					} else if strings.HasPrefix(part.FileData.MIMEType, "video/") {
+						if video == nil { // take the first video,
+							video = &genai.Video{
+								URI:      part.FileData.FileURI,
+								MIMEType: part.FileData.MIMEType,
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// generate
+		resultAsText := ""
+		videoGenerated := false
+		successful := false
+		ctxGenerate, cancelGenerate := context.WithTimeout(ctxBg, longRequestTimeoutSeconds*time.Second)
+		defer cancelGenerate()
+		if generated, err := gtc.GenerateVideos(
+			ctxGenerate,
+			prompt,
+			image,
+			video,
+			opts,
+		); err == nil {
+			for i, video := range generated.GeneratedVideos {
+				var data []byte
+				var mimeType string
+
+				videoGenerated = true
+				if len(video.Video.VideoBytes) > 0 {
+					data = video.Video.VideoBytes
+					mimeType = video.Video.MIMEType
+				} else if len(video.Video.URI) > 0 {
+					// TODO: ... read bytes from google cloud storage
+				} else {
+					videoGenerated = false
+
+					if _, e := sendMessage(
+						ctxBg,
+						bot,
+						conf,
+						fmt.Sprintf("Video generation failed: no video content found at videos[i].", i),
+						chatID,
+						&messageID,
+					); e != nil {
+						errs = append(errs, fmt.Errorf("failed to send error message: %w", e))
+					}
+				}
+
+				if len(data) > 0 {
+					if _, e := sendVideo(
+						ctxBg,
+						bot,
+						conf,
+						data,
+						chatID,
+						&messageID,
+					); e == nil {
+						resultAsText = fmt.Sprintf("%s;%d bytes", mimeType, len(data))
+						successful = true
+					} else {
+						errs = append(errs, fmt.Errorf("failed to send video: %w", e))
+					}
+				}
+			}
+			if !successful {
+				if videoGenerated {
+					if _, e := sendMessage(
+						ctxBg,
+						bot,
+						conf,
+						"Successfully generated video(s), but send failed.",
+						chatID,
+						&messageID,
+					); e != nil {
+						errs = append(errs, fmt.Errorf("failed to send error message: %w", e))
+					}
+				} else {
+					if _, e := sendMessage(
+						ctxBg,
+						bot,
+						conf,
+						`No video was returned from API`,
+						chatID,
+						&messageID,
+					); e != nil {
+						errs = append(errs, fmt.Errorf("failed to send error message: %w", e))
+					}
+				}
+			}
+		} else {
+			errs = append(errs, fmt.Errorf("failed to generate video: %w", err))
+
+			if _, e := sendMessage(
+				ctxBg,
+				bot,
+				conf,
+				fmt.Sprintf("Video generation failed: %s", redactError(conf, err)),
 				chatID,
 				&messageID,
 			); e != nil {
