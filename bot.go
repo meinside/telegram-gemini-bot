@@ -27,8 +27,6 @@ const (
 	defaultGenerativeModelForImageGeneration  = `gemini-2.0-flash-preview-image-generation`
 	defaultGenerativeModelForSpeechGeneration = `gemini-2.5-flash-preview-tts`
 
-	defaultAIHarmBlockThreshold genai.HarmBlockThreshold = genai.HarmBlockThresholdBlockOnlyHigh
-
 	// https://ai.google.dev/gemini-api/docs/speech-generation#voices
 	defaultGenerativeModelForSpeechGenerationVoice = `Kore`
 

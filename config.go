@@ -12,10 +12,6 @@ import (
 	"path"
 	"time"
 
-	// google ai
-
-	"google.golang.org/genai"
-
 	// infisical
 	infisical "github.com/infisical/go-sdk"
 	"github.com/infisical/go-sdk/packages/models"
@@ -29,9 +25,6 @@ type config struct {
 	GoogleGenerativeModel                    *string `json:"google_generative_model,omitempty"`
 	GoogleGenerativeModelForImageGeneration  *string `json:"google_generative_model_for_image_generation,omitempty"`
 	GoogleGenerativeModelForSpeechGeneration *string `json:"google_generative_model_for_speech_generation,omitempty"`
-
-	// google ai safety settings threshold
-	GoogleAIHarmBlockThreshold *genai.HarmBlockThreshold `json:"google_ai_harm_block_threshold,omitempty"`
 
 	// google ai speech generation settings
 	GoogleGenerativeModelForSpeechGenerationVoice *string `json:"google_generative_model_for_speech_generation_voice,omitempty"`
@@ -141,9 +134,6 @@ func loadConfig(
 				}
 				if conf.GoogleGenerativeModelForSpeechGenerationVoice == nil {
 					conf.GoogleGenerativeModelForSpeechGenerationVoice = ptr(defaultGenerativeModelForSpeechGenerationVoice)
-				}
-				if conf.GoogleAIHarmBlockThreshold == nil {
-					conf.GoogleAIHarmBlockThreshold = ptr(defaultAIHarmBlockThreshold)
 				}
 				if conf.AnswerTimeoutSeconds <= 0 {
 					conf.AnswerTimeoutSeconds = longRequestTimeoutSeconds
