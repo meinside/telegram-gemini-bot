@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"os/exec"
 	"regexp"
 	"slices"
@@ -36,6 +37,32 @@ const (
 	defaultPromptForMedias = `Describe provided media(s).`
 )
 
+// create a gemini-things client with given config
+func gtClient(
+	ctx context.Context,
+	cfg config,
+	opts ...gt.ClientOption,
+) (*gt.Client, error) {
+	if cfg.GoogleAIAPIKey != nil {
+		return gt.NewClient(
+			*cfg.GoogleAIAPIKey,
+			opts...,
+		)
+	} else if cfg.GoogleCredentialsFilepath != nil {
+		bytes, err := os.ReadFile(*cfg.GoogleCredentialsFilepath)
+		if err != nil {
+			return nil, err
+		}
+		return gt.NewVertexClient(
+			ctx,
+			bytes,
+			*cfg.Location,
+			opts...,
+		)
+	}
+	return nil, fmt.Errorf("no google ai api key or credentials file provided")
+}
+
 // redactError given error for logging and/or messaing
 func redactError(
 	conf config,
@@ -43,8 +70,10 @@ func redactError(
 ) (redacted string) {
 	redacted = gt.ErrToStr(err)
 
-	if strings.Contains(redacted, *conf.GoogleAIAPIKey) {
-		redacted = strings.ReplaceAll(redacted, *conf.GoogleAIAPIKey, redactedString)
+	if conf.GoogleAIAPIKey != nil {
+		if strings.Contains(redacted, *conf.GoogleAIAPIKey) {
+			redacted = strings.ReplaceAll(redacted, *conf.GoogleAIAPIKey, redactedString)
+		}
 	}
 	if strings.Contains(redacted, *conf.TelegramBotToken) {
 		redacted = strings.ReplaceAll(redacted, *conf.TelegramBotToken, redactedString)
@@ -142,9 +171,11 @@ func helpMessage(conf config) string {
 	return fmt.Sprintf(msgHelp,
 		*conf.GoogleGenerativeModel,
 		*conf.GoogleGenerativeModelForImageGeneration,
+		*conf.GoogleGenerativeModelForVideoGeneration,
 		*conf.GoogleGenerativeModelForSpeechGeneration,
 		version.Build(version.OS|version.Architecture|version.Revision),
 		cmdGenerateImage+" <prompt>", descGenerateImage,
+		cmdGenerateVideo+" <prompt>", descGenerateVideo,
 		cmdGenerateSpeech+" <prompt>", descGenerateSpeech,
 		cmdGenerateWithGoogleSearch+" <prompt>", descGenerateWithGoogleSearch,
 		cmdStats, descStats,

@@ -17,6 +17,10 @@ import (
 	"github.com/infisical/go-sdk/packages/models"
 )
 
+const (
+	defaultLocation = `global`
+)
+
 // config struct for loading a configuration file
 type config struct {
 	SystemInstruction *string `json:"system_instruction,omitempty"`
@@ -24,6 +28,7 @@ type config struct {
 	// models
 	GoogleGenerativeModel                    *string `json:"google_generative_model,omitempty"`
 	GoogleGenerativeModelForImageGeneration  *string `json:"google_generative_model_for_image_generation,omitempty"`
+	GoogleGenerativeModelForVideoGeneration  *string `json:"google_generative_model_for_video_generation,omitempty"`
 	GoogleGenerativeModelForSpeechGeneration *string `json:"google_generative_model_for_speech_generation,omitempty"`
 
 	// google ai speech generation settings
@@ -35,9 +40,13 @@ type config struct {
 	AnswerTimeoutSeconds  int      `json:"answer_timeout_seconds,omitempty"`
 	Verbose               bool     `json:"verbose,omitempty"`
 
-	// telegram bot and google api tokens
+	// telegram bot
 	TelegramBotToken *string `json:"telegram_bot_token,omitempty"`
-	GoogleAIAPIKey   *string `json:"google_ai_api_key,omitempty"`
+
+	// google credentials
+	GoogleAIAPIKey            *string `json:"google_ai_api_key,omitempty"`
+	GoogleCredentialsFilepath *string `json:"google_credentials_filepath,omitempty"`
+	Location                  *string `json:"location,omitempty"`
 
 	// or Infisical settings
 	Infisical *infisicalSetting `json:"infisical,omitempty"`
@@ -129,6 +138,9 @@ func loadConfig(
 				if conf.GoogleGenerativeModelForImageGeneration == nil {
 					conf.GoogleGenerativeModelForImageGeneration = ptr(defaultGenerativeModelForImageGeneration)
 				}
+				if conf.GoogleGenerativeModelForVideoGeneration == nil {
+					conf.GoogleGenerativeModelForVideoGeneration = ptr(defaultGenerativeModelForVideoGeneration)
+				}
 				if conf.GoogleGenerativeModelForSpeechGeneration == nil {
 					conf.GoogleGenerativeModelForSpeechGeneration = ptr(defaultGenerativeModelForSpeechGeneration)
 				}
@@ -138,10 +150,14 @@ func loadConfig(
 				if conf.AnswerTimeoutSeconds <= 0 {
 					conf.AnswerTimeoutSeconds = longRequestTimeoutSeconds
 				}
+				if conf.Location == nil {
+					conf.Location = ptr(defaultLocation)
+				}
 
 				// check the existence of essential values
-				if conf.TelegramBotToken == nil || conf.GoogleAIAPIKey == nil {
-					err = fmt.Errorf("`telegram_bot_token` and/or `google_ai_api_key` values are missing")
+				if conf.TelegramBotToken == nil ||
+					(conf.GoogleAIAPIKey == nil && conf.GoogleCredentialsFilepath == nil) {
+					err = fmt.Errorf("`telegram_bot_token` and/or `google_ai_api_key`/`google_credentials_filepath` values are missing")
 				}
 			}
 		}

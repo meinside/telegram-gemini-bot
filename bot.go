@@ -23,8 +23,9 @@ import (
 
 // constants for default values
 const (
-	defaultGenerativeModel                    = `gemini-2.5-flash`
-	defaultGenerativeModelForImageGeneration  = `gemini-2.0-flash-preview-image-generation`
+	defaultGenerativeModel                    = `gemini-3-pro-preview`
+	defaultGenerativeModelForImageGeneration  = `gemini-3-pro-image-preview`
+	defaultGenerativeModelForVideoGeneration  = `veo-3.1-generate-preview`
 	defaultGenerativeModelForSpeechGeneration = `gemini-2.5-flash-preview-tts`
 
 	// https://ai.google.dev/gemini-api/docs/speech-generation#voices
@@ -63,6 +64,8 @@ const (
 	// commands for various types of generations
 	cmdGenerateImage             = "/image"
 	descGenerateImage            = `generate image(s) with the given prompt.`
+	cmdGenerateVideo             = "/video"
+	descGenerateVideo            = `generate video(s) with the given prompt.`
 	cmdGenerateSpeech            = "/speech"
 	descGenerateSpeech           = `generate a speech with the given prompt.`
 	cmdGenerateWithGoogleSearch  = "/google"
@@ -75,18 +78,20 @@ const (
 	msgDatabaseEmpty         = `Database is empty.`
 	msgHelp                  = `Help message here:
 
-%[5]s : %[6]s
-%[7]s : %[8]s
-%[9]s : %[10]s
-%[11]s : %[12]s
-%[13]s : %[14]s
-%[15]s : %[16]s
+%[6]s : %[7]s
+%[8]s : %[9]s
+%[10]s : %[11]s
+%[12]s : %[13]s
+%[14]s : %[15]s
+%[16]s : %[17]s
+%[18]s : %[19]s
 
 - configured models:
   * text: %[1]s
   * image: %[2]s
-  * speech: %[3]s
-- version: %[4]s
+  * video: %[3]s
+  * speech: %[4]s
+- version: %[5]s
 `
 	msgPrivacy = `Privacy Policy:
 
@@ -110,6 +115,8 @@ type chatMessage struct {
 
 // launch bot with given parameters
 func runBot(conf config) {
+	ctx := context.Background()
+
 	token := conf.TelegramBotToken
 
 	allowedUsers := map[string]bool{}
@@ -121,8 +128,9 @@ func runBot(conf config) {
 	bot := tg.NewClient(*token)
 
 	// gemini-things client for text generation
-	gtc, err := gt.NewClient(
-		*conf.GoogleAIAPIKey,
+	gtc, err := gtClient(
+		ctx,
+		conf,
 		gt.WithModel(*conf.GoogleGenerativeModel),
 	)
 	if err != nil {
@@ -140,8 +148,9 @@ func runBot(conf config) {
 	defer func() { _ = gtc.Close() }()
 
 	// gemini-things client for image generation
-	gtcImg, err := gt.NewClient(
-		*conf.GoogleAIAPIKey,
+	gtcImg, err := gtClient(
+		ctx,
+		conf,
 		gt.WithModel(*conf.GoogleGenerativeModelForImageGeneration),
 	)
 	if err != nil {
@@ -152,9 +161,24 @@ func runBot(conf config) {
 	gtcImg.SetSystemInstructionFunc(nil)
 	defer func() { _ = gtcImg.Close() }()
 
+	// gemini-things client for video generation
+	gtcVideo, err := gtClient(
+		ctx,
+		conf,
+		gt.WithModel(*conf.GoogleGenerativeModelForVideoGeneration),
+	)
+	if err != nil {
+		log.Printf("error initializing gemini-things client for video generation: %s", redactError(conf, err))
+
+		os.Exit(1)
+	}
+	gtcVideo.SetSystemInstructionFunc(nil)
+	defer func() { _ = gtcVideo.Close() }()
+
 	// gemini-things client for speech generation
-	gtcSpeech, err := gt.NewClient(
-		*conf.GoogleAIAPIKey,
+	gtcSpeech, err := gtClient(
+		ctx,
+		conf,
 		gt.WithModel(*conf.GoogleGenerativeModelForSpeechGeneration),
 	)
 	if err != nil {
@@ -294,6 +318,7 @@ func runBot(conf config) {
 
 		// set generation commands' handlers
 		bot.AddCommandHandler(cmdGenerateImage, genImageCommandHandler(ctxBg, conf, db, gtcImg, allowedUsers))
+		bot.AddCommandHandler(cmdGenerateVideo, genVideoCommandHandler(ctxBg, conf, db, gtcVideo, allowedUsers))
 		bot.AddCommandHandler(cmdGenerateSpeech, genSpeechCommandHandler(ctxBg, conf, db, gtcSpeech, allowedUsers))
 		bot.AddCommandHandler(cmdGenerateWithGoogleSearch, genWithGoogleSearchCommandHandler(ctxBg, conf, db, gtc, allowedUsers))
 		bot.SetNoMatchingCommandHandler(noSuchCommandHandler(ctxBg, conf, allowedUsers))
