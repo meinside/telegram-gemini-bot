@@ -297,13 +297,12 @@ func answer(
 		tg.NewMessageReactionWithEmoji("👌"),
 	)
 
-	opts := &gt.GenerationOptions{
+	opts := &genai.GenerateContentConfig{
 		Tools: []*genai.Tool{
 			{
 				URLContext: &genai.URLContext{},
 			},
 		},
-		HarmBlockThreshold: conf.GoogleAIHarmBlockThreshold,
 	}
 	if withGoogleSearch {
 		opts.Tools[0].GoogleSearch = &genai.GoogleSearch{}
@@ -548,7 +547,7 @@ func answerWithImage(
 		tg.NewMessageReactionWithEmoji("👌"),
 	)
 
-	opts := &gt.GenerationOptions{
+	opts := &genai.GenerateContentConfig{
 		// FIXME: Url Context as tool is not enabled for <image generation model>
 		/*
 			Tools: []*genai.Tool{
@@ -557,10 +556,9 @@ func answerWithImage(
 				},
 			},
 		*/
-		HarmBlockThreshold: conf.GoogleAIHarmBlockThreshold,
-		ResponseModalities: []genai.Modality{
-			genai.ModalityText,
-			genai.ModalityImage,
+		ResponseModalities: []string{
+			string(genai.ModalityText),
+			string(genai.ModalityImage),
 		},
 	}
 
@@ -797,7 +795,7 @@ func answerWithVoice(
 		tg.NewMessageReactionWithEmoji("👌"),
 	)
 
-	opts := &gt.GenerationOptions{
+	opts := &genai.GenerateContentConfig{
 		// FIXME: Url Context as tool is not enabled for <speech generation model>
 		/*
 			Tools: []*genai.Tool{
@@ -806,9 +804,8 @@ func answerWithVoice(
 				},
 			},
 		*/
-		HarmBlockThreshold: conf.GoogleAIHarmBlockThreshold,
-		ResponseModalities: []genai.Modality{
-			genai.ModalityAudio,
+		ResponseModalities: []string{
+			string(genai.ModalityAudio),
 		},
 	}
 	if conf.GoogleGenerativeModelForSpeechGenerationVoice != nil {

@@ -188,7 +188,7 @@ func convertPromptWithURLs(
 				}
 				converted = append(
 					converted,
-					gt.PromptFromURI(url),
+					gt.PromptFromURI(url, `video/mp4`),
 				)
 			} else { // => keep the original urls as-is
 				converted = append(
