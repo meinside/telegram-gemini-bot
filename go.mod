@@ -5,8 +5,8 @@ go 1.25.0
 require (
 	github.com/gabriel-vasile/mimetype v1.4.12
 	github.com/infisical/go-sdk v0.6.3
-	github.com/meinside/gemini-things-go v0.5.3
-	github.com/meinside/telegram-bot-go v0.12.0
+	github.com/meinside/gemini-things-go v0.5.5
+	github.com/meinside/telegram-bot-go v0.12.1
 	github.com/meinside/version-go v0.0.3
 	github.com/tailscale/hujson v0.0.0-20250605163823-992244df8c5a
 	golang.org/x/text v0.32.0
@@ -63,7 +63,7 @@ require (
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
-	github.com/mattn/go-sqlite3 v1.14.32 // indirect
+	github.com/mattn/go-sqlite3 v1.14.33 // indirect
 	github.com/modelcontextprotocol/go-sdk v1.2.0 // indirect
 	github.com/oracle/oci-go-sdk/v65 v65.105.2 // indirect
 	github.com/planetscale/vtprotobuf v0.6.1-0.20240319094008-0393e58bdf10 // indirect

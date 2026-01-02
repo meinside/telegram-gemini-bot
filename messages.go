@@ -986,7 +986,7 @@ func answerWithVideo(
 						ctxBg,
 						bot,
 						conf,
-						fmt.Sprintf("Video generation failed: no video content found at videos[i].", i),
+						fmt.Sprintf("Video generation failed: no video content found at videos[%d].", i),
 						chatID,
 						&messageID,
 					); e != nil {
