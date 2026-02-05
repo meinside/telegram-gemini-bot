@@ -57,6 +57,7 @@ func gtClient(
 			ctx,
 			bytes,
 			*cfg.Location,
+			*cfg.BucketName,
 			opts...,
 		)
 	}

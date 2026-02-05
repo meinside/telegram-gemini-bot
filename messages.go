@@ -926,10 +926,10 @@ func answerWithVideo(
 		prompts,
 		history,
 	); err == nil {
-		// get `prompt`, `image`, `video` from `prompts`
+		// get `prompt`, `firstFrame`, `lastFrame`, and `videoToExtend` from `prompts`
 		var prompt *string
-		var image *genai.Image
-		var video *genai.Video
+		var firstFrame, lastFrame *genai.Image
+		var videoToExtend *genai.Video
 		for _, content := range contents {
 			for _, part := range content.Parts {
 				if part.Text != "" {
@@ -938,22 +938,32 @@ func answerWithVideo(
 					}
 				} else if part.FileData != nil {
 					if strings.HasPrefix(part.FileData.MIMEType, "image/") {
-						if image == nil { // take the first image,
-							image = &genai.Image{
+						if firstFrame == nil { // take the first frame,
+							firstFrame = &genai.Image{
+								GCSURI:   part.FileData.FileURI,
+								MIMEType: part.FileData.MIMEType,
+							}
+						} else if lastFrame == nil { // take the last frame,
+							lastFrame = &genai.Image{
 								GCSURI:   part.FileData.FileURI,
 								MIMEType: part.FileData.MIMEType,
 							}
 						}
+						// else: ignore other images
 					} else if strings.HasPrefix(part.FileData.MIMEType, "video/") {
-						if video == nil { // take the first video,
-							video = &genai.Video{
+						if videoToExtend == nil { // take the video to extend,
+							videoToExtend = &genai.Video{
 								URI:      part.FileData.FileURI,
 								MIMEType: part.FileData.MIMEType,
 							}
 						}
+						// else: ignore other videos
 					}
 				}
 			}
+		}
+		if lastFrame != nil {
+			opts.LastFrame = lastFrame
 		}
 
 		// generate
@@ -965,8 +975,8 @@ func answerWithVideo(
 		if generated, err := gtc.GenerateVideos(
 			ctxGenerate,
 			prompt,
-			image,
-			video,
+			firstFrame,
+			videoToExtend,
 			opts,
 		); err == nil {
 			for i, video := range generated.GeneratedVideos {
@@ -978,7 +988,7 @@ func answerWithVideo(
 					data = video.Video.VideoBytes
 					mimeType = video.Video.MIMEType
 				} else if len(video.Video.URI) > 0 {
-					// TODO: ... read bytes from google cloud storage
+					// TODO: ... read bytes from google cloud storage (?)
 				} else {
 					videoGenerated = false
 
