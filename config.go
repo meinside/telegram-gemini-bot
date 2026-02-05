@@ -18,7 +18,8 @@ import (
 )
 
 const (
-	defaultLocation = `global`
+	defaultLocation   = `global`
+	defaultBucketName = `telegram-gemini-bot`
 )
 
 // config struct for loading a configuration file
@@ -47,6 +48,7 @@ type config struct {
 	GoogleAIAPIKey            *string `json:"google_ai_api_key,omitempty"`
 	GoogleCredentialsFilepath *string `json:"google_credentials_filepath,omitempty"`
 	Location                  *string `json:"location,omitempty"`
+	BucketName                *string `json:"bucket,omitempty"`
 
 	// or Infisical settings
 	Infisical *infisicalSetting `json:"infisical,omitempty"`
@@ -152,6 +154,9 @@ func loadConfig(
 				}
 				if conf.Location == nil {
 					conf.Location = ptr(defaultLocation)
+				}
+				if conf.BucketName == nil {
+					conf.BucketName = ptr(defaultBucketName)
 				}
 
 				// check the existence of essential values
