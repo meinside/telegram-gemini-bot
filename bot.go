@@ -128,7 +128,7 @@ func runBot(conf config) {
 	bot := tg.NewClient(*token)
 
 	// gemini-things client for text generation
-	gtc, err := gtClient(
+	gtcText, err := gtClient(
 		ctx,
 		conf,
 		gt.WithModel(*conf.GoogleGenerativeModel),
@@ -138,14 +138,14 @@ func runBot(conf config) {
 
 		os.Exit(1)
 	}
-	gtc.SetSystemInstructionFunc(func() string {
+	gtcText.SetSystemInstructionFunc(func() string {
 		if conf.SystemInstruction == nil {
 			return defaultSystemInstruction()
 		} else {
 			return *conf.SystemInstruction
 		}
 	})
-	defer func() { _ = gtc.Close() }()
+	defer func() { _ = gtcText.Close() }()
 
 	// gemini-things client for image generation
 	gtcImg, err := gtClient(
@@ -229,7 +229,7 @@ func runBot(conf config) {
 				b,
 				conf,
 				db,
-				gtc,
+				gtcText, gtcImg, gtcSpeech, gtcVideo,
 				[]tg.Update{update},
 				nil,
 				false,
@@ -253,7 +253,7 @@ func runBot(conf config) {
 				b,
 				conf,
 				db,
-				gtc,
+				gtcText, gtcImg, gtcSpeech, gtcVideo,
 				updates,
 				&mediaGroupID,
 				false,
@@ -320,7 +320,7 @@ func runBot(conf config) {
 		bot.AddCommandHandler(cmdGenerateImage, genImageCommandHandler(ctxBg, conf, db, gtcImg, allowedUsers))
 		bot.AddCommandHandler(cmdGenerateVideo, genVideoCommandHandler(ctxBg, conf, db, gtcVideo, allowedUsers))
 		bot.AddCommandHandler(cmdGenerateSpeech, genSpeechCommandHandler(ctxBg, conf, db, gtcSpeech, allowedUsers))
-		bot.AddCommandHandler(cmdGenerateWithGoogleSearch, genWithGoogleSearchCommandHandler(ctxBg, conf, db, gtc, allowedUsers))
+		bot.AddCommandHandler(cmdGenerateWithGoogleSearch, genWithGoogleSearchCommandHandler(ctxBg, conf, db, gtcText, allowedUsers))
 		bot.SetNoMatchingCommandHandler(noSuchCommandHandler(ctxBg, conf, allowedUsers))
 
 		// set bot commands

@@ -276,7 +276,7 @@ func genSpeechCommandHandler(
 		}
 
 		if parent, original, err := chatMessagesFromTGMessage(ctxBg, b, *message); err == nil {
-			if err := answerWithVoice(
+			if err := answerWithSpeech(
 				ctxBg,
 				b,
 				conf,
@@ -302,7 +302,7 @@ func genWithGoogleSearchCommandHandler(
 	ctxBg context.Context,
 	conf config,
 	db *Database,
-	gtc *gt.Client,
+	gtcText *gt.Client,
 	allowedUsers map[string]bool,
 ) func(b *tg.Bot, update tg.Update, args string) {
 	return func(b *tg.Bot, update tg.Update, args string) {
@@ -340,7 +340,7 @@ func genWithGoogleSearchCommandHandler(
 			b,
 			conf,
 			db,
-			gtc,
+			gtcText, nil, nil, nil,
 			[]tg.Update{update},
 			nil,
 			true,

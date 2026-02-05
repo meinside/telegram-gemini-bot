@@ -32,7 +32,7 @@ func handleMessages(
 	bot *tg.Bot,
 	conf config,
 	db *Database,
-	gtc *gt.Client,
+	gtcText, gtcImage, gtcSpeech, gtcVideo *gt.Client,
 	updates []tg.Update,
 	mediaGroupID *string,
 	withGoogleSearch bool,
@@ -77,25 +77,93 @@ func handleMessages(
 			otherGroupedMessages...,
 		); err == nil {
 			if original != nil {
-				if e := answer(
-					ctxBg,
-					bot,
-					conf,
-					db,
-					gtc,
-					parent,
-					original,
-					chatID,
-					userID,
-					userNameFromUpdate(update),
-					messageID,
-					withGoogleSearch,
-				); e == nil {
-					return
-				} else {
-					log.Printf("failed to answer message: %s", redactError(conf, e))
+				if gtcImage != nil &&
+					msg.HasCaption() &&
+					strings.HasPrefix(*msg.Caption, cmdGenerateImage) { // if there is a caption which begins with `cmdGenerateImage` command,
+					if e := answerWithImage(
+						ctxBg,
+						bot,
+						conf,
+						db,
+						gtcImage,
+						parent,
+						original,
+						chatID,
+						userID,
+						userNameFromUpdate(update),
+						messageID,
+					); e == nil {
+						return
+					} else {
+						log.Printf("failed to answer message with image: %s", redactError(conf, e))
 
-					errMessage = fmt.Sprintf("Failed to answer message: %s", redactError(conf, e))
+						errMessage = fmt.Sprintf("Failed to answer message with image: %s", redactError(conf, e))
+					}
+				} else if gtcSpeech != nil &&
+					msg.HasCaption() &&
+					strings.HasPrefix(*msg.Caption, cmdGenerateSpeech) { // if there is a caption which begins with `cmdGenerateSpeech` command,
+					if e := answerWithSpeech(
+						ctxBg,
+						bot,
+						conf,
+						db,
+						gtcSpeech,
+						parent,
+						original,
+						chatID,
+						userID,
+						userNameFromUpdate(update),
+						messageID,
+					); e == nil {
+						return
+					} else {
+						log.Printf("failed to answer message with voice: %s", redactError(conf, e))
+
+						errMessage = fmt.Sprintf("Failed to answer message with voice: %s", redactError(conf, e))
+					}
+				} else if gtcVideo != nil &&
+					msg.HasCaption() &&
+					strings.HasPrefix(*msg.Caption, cmdGenerateVideo) { // if there is a caption which begins with `cmdGenerateVideo` command,
+					if e := answerWithVideo(
+						ctxBg,
+						bot,
+						conf,
+						db,
+						gtcVideo,
+						parent,
+						original,
+						chatID,
+						userID,
+						userNameFromUpdate(update),
+						messageID,
+					); e == nil {
+						return
+					} else {
+						log.Printf("failed to answer message with video: %s", redactError(conf, e))
+
+						errMessage = fmt.Sprintf("Failed to answer message with video: %s", redactError(conf, e))
+					}
+				} else {
+					if e := answer(
+						ctxBg,
+						bot,
+						conf,
+						db,
+						gtcText,
+						parent,
+						original,
+						chatID,
+						userID,
+						userNameFromUpdate(update),
+						messageID,
+						withGoogleSearch,
+					); e == nil {
+						return
+					} else {
+						log.Printf("failed to answer message: %s", redactError(conf, e))
+
+						errMessage = fmt.Sprintf("Failed to answer message: %s", redactError(conf, e))
+					}
 				}
 			} else {
 				log.Printf("no converted chat messages from update: %+v", update)
@@ -333,7 +401,7 @@ func answer(
 		ctxReaction,
 		chatID,
 		messageID,
-		tg.NewMessageReactionWithEmoji("👌"),
+		tg.NewMessageReactionWithEmoji("🫡"),
 	)
 
 	opts := &genai.GenerateContentConfig{
@@ -526,13 +594,13 @@ func answer(
 		// log if it was successful or not
 		successful := (func() bool {
 			if firstMessageID != nil {
-				// leave a reaction on the first message for notifying the termination of the stream
+				// leave a reaction on the message for notifying the termination of the stream
 				ctxReaction, cancelReaction := context.WithTimeout(ctxBg, requestTimeoutSeconds*time.Second)
 				defer cancelReaction()
 				if result := bot.SetMessageReaction(
 					ctxReaction,
 					chatID,
-					*firstMessageID,
+					messageID,
 					tg.NewMessageReactionWithEmoji("👌"),
 				); !result.Ok {
 					errs = append(errs, fmt.Errorf("failed to set message reaction: %s", *result.Description))
@@ -583,7 +651,7 @@ func answerWithImage(
 		ctxReaction,
 		chatID,
 		messageID,
-		tg.NewMessageReactionWithEmoji("👌"),
+		tg.NewMessageReactionWithEmoji("🫡"),
 	)
 
 	opts := &genai.GenerateContentConfig{
@@ -744,7 +812,19 @@ func answerWithImage(
 					}
 				}
 			}
-			if !successful {
+			if successful {
+				// leave a reaction on the message for notifying the termination of the stream
+				ctxReaction, cancelReaction := context.WithTimeout(ctxBg, requestTimeoutSeconds*time.Second)
+				defer cancelReaction()
+				if result := bot.SetMessageReaction(
+					ctxReaction,
+					chatID,
+					messageID,
+					tg.NewMessageReactionWithEmoji("👌"),
+				); !result.Ok {
+					errs = append(errs, fmt.Errorf("failed to set message reaction: %s", *result.Description))
+				}
+			} else {
 				if imageGenerated {
 					if _, e := sendMessage(
 						ctxBg,
@@ -831,7 +911,7 @@ func answerWithVideo(
 		ctxReaction,
 		chatID,
 		messageID,
-		tg.NewMessageReactionWithEmoji("👌"),
+		tg.NewMessageReactionWithEmoji("🫡"),
 	)
 
 	opts := &genai.GenerateVideosConfig{
@@ -1020,7 +1100,19 @@ func answerWithVideo(
 					}
 				}
 			}
-			if !successful {
+			if successful {
+				// leave a reaction on the message for notifying the termination of the stream
+				ctxReaction, cancelReaction := context.WithTimeout(ctxBg, requestTimeoutSeconds*time.Second)
+				defer cancelReaction()
+				if result := bot.SetMessageReaction(
+					ctxReaction,
+					chatID,
+					messageID,
+					tg.NewMessageReactionWithEmoji("👌"),
+				); !result.Ok {
+					errs = append(errs, fmt.Errorf("failed to set message reaction: %s", *result.Description))
+				}
+			} else {
 				if videoGenerated {
 					if _, e := sendMessage(
 						ctxBg,
@@ -1081,7 +1173,7 @@ func answerWithVideo(
 }
 
 // generate a speech with given message and send it to the chat
-func answerWithVoice(
+func answerWithSpeech(
 	ctxBg context.Context,
 	bot *tg.Bot,
 	conf config,
@@ -1101,7 +1193,7 @@ func answerWithVoice(
 		ctxReaction,
 		chatID,
 		messageID,
-		tg.NewMessageReactionWithEmoji("👌"),
+		tg.NewMessageReactionWithEmoji("🫡"),
 	)
 
 	opts := &genai.GenerateContentConfig{
@@ -1290,7 +1382,19 @@ func answerWithVoice(
 					}
 				}
 			}
-			if !successful {
+			if successful {
+				// leave a reaction on the message for notifying the termination of the stream
+				ctxReaction, cancelReaction := context.WithTimeout(ctxBg, requestTimeoutSeconds*time.Second)
+				defer cancelReaction()
+				if result := bot.SetMessageReaction(
+					ctxReaction,
+					chatID,
+					messageID,
+					tg.NewMessageReactionWithEmoji("👌"),
+				); !result.Ok {
+					errs = append(errs, fmt.Errorf("failed to set message reaction: %s", *result.Description))
+				}
+			} else {
 				if _, e := sendMessage(
 					ctxBg,
 					bot,
