@@ -195,12 +195,12 @@ func runBot(conf config) {
 	// delete webhook before polling updates
 	ctxDelete, cancelDelete := context.WithTimeout(ctxBg, requestTimeoutSeconds*time.Second)
 	defer cancelDelete()
-	_ = bot.DeleteWebhook(ctxDelete, false)
+	_, _ = bot.DeleteWebhook(ctxDelete, false)
 
 	// get bot info
 	ctxInfo, cancelInfo := context.WithTimeout(ctxBg, requestTimeoutSeconds*time.Second)
 	defer cancelInfo()
-	if b := bot.GetMe(ctxInfo); b.Ok {
+	if b, _ := bot.GetMe(ctxInfo); b.OK {
 		log.Printf("launching bot: %s", userName(b.Result))
 
 		// database
@@ -300,12 +300,12 @@ func runBot(conf config) {
 			// answer inline query
 			ctxAnswer, cancelAnswer := context.WithTimeout(ctxBg, requestTimeoutSeconds*time.Second)
 			defer cancelAnswer()
-			if result := bot.AnswerInlineQuery(
+			if result, _ := bot.AnswerInlineQuery(
 				ctxAnswer,
 				inlineQuery.ID,
 				results,
 				options,
-			); !result.Ok {
+			); !result.OK {
 				log.Printf("failed to answer inline query: %s", *result.Description)
 			}
 		})
@@ -326,7 +326,7 @@ func runBot(conf config) {
 		// set bot commands
 		ctxCommands, cancelCommands := context.WithTimeout(ctxBg, requestTimeoutSeconds*time.Second)
 		defer cancelCommands()
-		if res := bot.SetMyCommands(
+		if res, _ := bot.SetMyCommands(
 			ctxCommands,
 			[]tg.BotCommand{
 				{
@@ -343,7 +343,7 @@ func runBot(conf config) {
 				},
 			},
 			tg.OptionsSetMyCommands{},
-		); !res.Ok {
+		); !res.OK {
 			log.Printf("failed to set bot commands: %s", *res.Description)
 		}
 

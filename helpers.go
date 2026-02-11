@@ -476,7 +476,7 @@ func readMedia(
 	ctxFile, cancelFile := context.WithTimeout(ctxBg, requestTimeoutSeconds*time.Second)
 	defer cancelFile()
 
-	if res := bot.GetFile(ctxFile, fileID); !res.Ok {
+	if res, _ := bot.GetFile(ctxFile, fileID); !res.OK {
 		err = fmt.Errorf("failed to read bytes from %s: %s", mediaType, *res.Description)
 	} else {
 		fileURL := bot.GetFileURL(*res.Result)
