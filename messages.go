@@ -204,7 +204,7 @@ func sendMessage(
 ) (sentMessageID int64, err error) {
 	ctxAction, cancelAction := context.WithTimeout(ctxBg, ignorableRequestTimeoutSeconds*time.Second)
 	defer cancelAction()
-	_ = bot.SendChatAction(ctxAction, chatID, tg.ChatActionTyping, nil)
+	_, _ = bot.SendChatAction(ctxAction, chatID, tg.ChatActionTyping, nil)
 
 	if conf.Verbose {
 		log.Printf("[verbose] sending message to chat(%d): '%s'", chatID, message)
@@ -219,12 +219,12 @@ func sendMessage(
 
 	ctxSend, cancelSend := context.WithTimeout(ctxBg, requestTimeoutSeconds*time.Second)
 	defer cancelSend()
-	if res := bot.SendMessage(
+	if res, _ := bot.SendMessage(
 		ctxSend,
 		chatID,
 		message,
 		options,
-	); res.Ok {
+	); res.OK {
 		sentMessageID = res.Result.MessageID
 	} else {
 		err = fmt.Errorf("failed to send message: %s (requested message: %s)", *res.Description, message)
@@ -244,7 +244,7 @@ func updateMessage(
 ) (err error) {
 	ctx, cancel := context.WithTimeout(ctxBg, ignorableRequestTimeoutSeconds*time.Second)
 	defer cancel()
-	_ = bot.SendChatAction(ctx, chatID, tg.ChatActionTyping, nil)
+	_, _ = bot.SendChatAction(ctx, chatID, tg.ChatActionTyping, nil)
 
 	if conf.Verbose {
 		log.Printf("[verbose] updating message in chat(%d): '%s'", chatID, message)
@@ -255,7 +255,7 @@ func updateMessage(
 	options := tg.OptionsEditMessageText{}.
 		SetIDs(chatID, messageID)
 
-	if res := bot.EditMessageText(ctxEdit, message, options); !res.Ok {
+	if res, _ := bot.EditMessageText(ctxEdit, message, options); !res.OK {
 		err = fmt.Errorf("failed to send message: %s (requested message: %s)", *res.Description, message)
 	}
 
@@ -273,7 +273,7 @@ func sendPhoto(
 ) (sentMessageID int64, err error) {
 	ctx, cancel := context.WithTimeout(ctxBg, ignorableRequestTimeoutSeconds*time.Second)
 	defer cancel()
-	_ = bot.SendChatAction(ctx, chatID, tg.ChatActionTyping, nil)
+	_, _ = bot.SendChatAction(ctx, chatID, tg.ChatActionTyping, nil)
 
 	if conf.Verbose {
 		log.Printf("[verbose] sending photo to chat(%d): %d bytes of data", chatID, len(data))
@@ -287,12 +287,12 @@ func sendPhoto(
 			MessageID: *messageID,
 		})
 	}
-	if res := bot.SendPhoto(
+	if res, _ := bot.SendPhoto(
 		ctxSend,
 		chatID,
 		tg.NewInputFileFromBytes(data),
 		options,
-	); res.Ok {
+	); res.OK {
 		sentMessageID = res.Result.MessageID
 	} else {
 		err = fmt.Errorf("failed to send photo: %s", *res.Description)
@@ -312,7 +312,7 @@ func sendVideo(
 ) (sentMessageID int64, err error) {
 	ctx, cancel := context.WithTimeout(ctxBg, ignorableRequestTimeoutSeconds*time.Second)
 	defer cancel()
-	_ = bot.SendChatAction(ctx, chatID, tg.ChatActionTyping, nil)
+	_, _ = bot.SendChatAction(ctx, chatID, tg.ChatActionTyping, nil)
 
 	if conf.Verbose {
 		log.Printf("[verbose] sending video to chat(%d): %d bytes of data", chatID, len(data))
@@ -326,12 +326,12 @@ func sendVideo(
 			MessageID: *messageID,
 		})
 	}
-	if res := bot.SendVideo(
+	if res, _ := bot.SendVideo(
 		ctxSend,
 		chatID,
 		tg.NewInputFileFromBytes(data),
 		options,
-	); res.Ok {
+	); res.OK {
 		sentMessageID = res.Result.MessageID
 	} else {
 		err = fmt.Errorf("failed to send video: %s", *res.Description)
@@ -351,7 +351,7 @@ func sendVoice(
 ) (sentMessageID int64, err error) {
 	ctx, cancel := context.WithTimeout(ctxBg, ignorableRequestTimeoutSeconds*time.Second)
 	defer cancel()
-	_ = bot.SendChatAction(ctx, chatID, tg.ChatActionTyping, nil)
+	_, _ = bot.SendChatAction(ctx, chatID, tg.ChatActionTyping, nil)
 
 	if conf.Verbose {
 		log.Printf("[verbose] sending voice to chat(%d): %d bytes of data", chatID, len(data))
@@ -365,12 +365,12 @@ func sendVoice(
 			MessageID: *messageID,
 		})
 	}
-	if res := bot.SendVoice(
+	if res, _ := bot.SendVoice(
 		ctxSend,
 		chatID,
 		tg.NewInputFileFromBytes(data),
 		options,
-	); res.Ok {
+	); res.OK {
 		sentMessageID = res.Result.MessageID
 	} else {
 		err = fmt.Errorf("failed to send voice: %s", *res.Description)
@@ -397,7 +397,7 @@ func answer(
 	// leave a reaction on the original message for confirmation
 	ctxReaction, cancelReaction := context.WithTimeout(ctxBg, ignorableRequestTimeoutSeconds*time.Second)
 	defer cancelReaction()
-	_ = bot.SetMessageReaction(
+	_, _ = bot.SetMessageReaction(
 		ctxReaction,
 		chatID,
 		messageID,
@@ -597,12 +597,12 @@ func answer(
 				// leave a reaction on the message for notifying the termination of the stream
 				ctxReaction, cancelReaction := context.WithTimeout(ctxBg, requestTimeoutSeconds*time.Second)
 				defer cancelReaction()
-				if result := bot.SetMessageReaction(
+				if result, _ := bot.SetMessageReaction(
 					ctxReaction,
 					chatID,
 					messageID,
 					tg.NewMessageReactionWithEmoji("👌"),
-				); !result.Ok {
+				); !result.OK {
 					errs = append(errs, fmt.Errorf("failed to set message reaction: %s", *result.Description))
 				}
 				return true
@@ -647,7 +647,7 @@ func answerWithImage(
 	// leave a reaction on the original message for confirmation
 	ctxReaction, cancelReaction := context.WithTimeout(ctxBg, ignorableRequestTimeoutSeconds*time.Second)
 	defer cancelReaction()
-	_ = bot.SetMessageReaction(
+	_, _ = bot.SetMessageReaction(
 		ctxReaction,
 		chatID,
 		messageID,
@@ -816,12 +816,12 @@ func answerWithImage(
 				// leave a reaction on the message for notifying the termination of the stream
 				ctxReaction, cancelReaction := context.WithTimeout(ctxBg, requestTimeoutSeconds*time.Second)
 				defer cancelReaction()
-				if result := bot.SetMessageReaction(
+				if result, _ := bot.SetMessageReaction(
 					ctxReaction,
 					chatID,
 					messageID,
 					tg.NewMessageReactionWithEmoji("👌"),
-				); !result.Ok {
+				); !result.OK {
 					errs = append(errs, fmt.Errorf("failed to set message reaction: %s", *result.Description))
 				}
 			} else {
@@ -907,7 +907,7 @@ func answerWithVideo(
 	// leave a reaction on the original message for confirmation
 	ctxReaction, cancelReaction := context.WithTimeout(ctxBg, ignorableRequestTimeoutSeconds*time.Second)
 	defer cancelReaction()
-	_ = bot.SetMessageReaction(
+	_, _ = bot.SetMessageReaction(
 		ctxReaction,
 		chatID,
 		messageID,
@@ -1104,12 +1104,12 @@ func answerWithVideo(
 				// leave a reaction on the message for notifying the termination of the stream
 				ctxReaction, cancelReaction := context.WithTimeout(ctxBg, requestTimeoutSeconds*time.Second)
 				defer cancelReaction()
-				if result := bot.SetMessageReaction(
+				if result, _ := bot.SetMessageReaction(
 					ctxReaction,
 					chatID,
 					messageID,
 					tg.NewMessageReactionWithEmoji("👌"),
-				); !result.Ok {
+				); !result.OK {
 					errs = append(errs, fmt.Errorf("failed to set message reaction: %s", *result.Description))
 				}
 			} else {
@@ -1189,7 +1189,7 @@ func answerWithSpeech(
 	// leave a reaction on the original message for confirmation
 	ctxReaction, cancelReaction := context.WithTimeout(ctxBg, ignorableRequestTimeoutSeconds*time.Second)
 	defer cancelReaction()
-	_ = bot.SetMessageReaction(
+	_, _ = bot.SetMessageReaction(
 		ctxReaction,
 		chatID,
 		messageID,
@@ -1386,12 +1386,12 @@ func answerWithSpeech(
 				// leave a reaction on the message for notifying the termination of the stream
 				ctxReaction, cancelReaction := context.WithTimeout(ctxBg, requestTimeoutSeconds*time.Second)
 				defer cancelReaction()
-				if result := bot.SetMessageReaction(
+				if result, _ := bot.SetMessageReaction(
 					ctxReaction,
 					chatID,
 					messageID,
 					tg.NewMessageReactionWithEmoji("👌"),
-				); !result.Ok {
+				); !result.OK {
 					errs = append(errs, fmt.Errorf("failed to set message reaction: %s", *result.Description))
 				}
 			} else {
