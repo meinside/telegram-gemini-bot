@@ -196,11 +196,6 @@ func standardizeJSON(b []byte) ([]byte, error) {
 	return ast.Pack(), nil
 }
 
-// get the address (pointer) of a value
-func ptr[T any](v T) *T {
-	return &v
-}
-
 // convert given prompt with http urls into usable prompts
 func convertPromptWithURLs(
 	prompt string,
