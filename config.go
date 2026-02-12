@@ -135,28 +135,28 @@ func loadConfig(
 
 				// set default/fallback values
 				if conf.GoogleGenerativeModel == nil {
-					conf.GoogleGenerativeModel = ptr(defaultGenerativeModel)
+					conf.GoogleGenerativeModel = new(defaultGenerativeModel)
 				}
 				if conf.GoogleGenerativeModelForImageGeneration == nil {
-					conf.GoogleGenerativeModelForImageGeneration = ptr(defaultGenerativeModelForImageGeneration)
+					conf.GoogleGenerativeModelForImageGeneration = new(defaultGenerativeModelForImageGeneration)
 				}
 				if conf.GoogleGenerativeModelForVideoGeneration == nil {
-					conf.GoogleGenerativeModelForVideoGeneration = ptr(defaultGenerativeModelForVideoGeneration)
+					conf.GoogleGenerativeModelForVideoGeneration = new(defaultGenerativeModelForVideoGeneration)
 				}
 				if conf.GoogleGenerativeModelForSpeechGeneration == nil {
-					conf.GoogleGenerativeModelForSpeechGeneration = ptr(defaultGenerativeModelForSpeechGeneration)
+					conf.GoogleGenerativeModelForSpeechGeneration = new(defaultGenerativeModelForSpeechGeneration)
 				}
 				if conf.GoogleGenerativeModelForSpeechGenerationVoice == nil {
-					conf.GoogleGenerativeModelForSpeechGenerationVoice = ptr(defaultGenerativeModelForSpeechGenerationVoice)
+					conf.GoogleGenerativeModelForSpeechGenerationVoice = new(defaultGenerativeModelForSpeechGenerationVoice)
 				}
 				if conf.AnswerTimeoutSeconds <= 0 {
 					conf.AnswerTimeoutSeconds = longRequestTimeoutSeconds
 				}
 				if conf.Location == nil {
-					conf.Location = ptr(defaultLocation)
+					conf.Location = new(defaultLocation)
 				}
 				if conf.BucketName == nil {
-					conf.BucketName = ptr(defaultBucketName)
+					conf.BucketName = new(defaultBucketName)
 				}
 
 				// check the existence of essential values

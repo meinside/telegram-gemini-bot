@@ -460,7 +460,7 @@ func answer(
 			parentFilesToUpload,
 		); err == nil {
 			for _, upload := range uploaded {
-				parts = append(parts, ptr(upload.ToPart()))
+				parts = append(parts, new(upload.ToPart()))
 			}
 		} else {
 			errs = append(errs, fmt.Errorf("file upload failed: %w", err))
@@ -714,7 +714,7 @@ func answerWithImage(
 			parentFilesToUpload,
 		); err == nil {
 			for _, upload := range uploaded {
-				parts = append(parts, ptr(upload.ToPart()))
+				parts = append(parts, new(upload.ToPart()))
 			}
 		} else {
 			errs = append(errs, fmt.Errorf("file upload failed: %w", err))
@@ -970,7 +970,7 @@ func answerWithVideo(
 			parentFilesToUpload,
 		); err == nil {
 			for _, upload := range uploaded {
-				parts = append(parts, ptr(upload.ToPart()))
+				parts = append(parts, new(upload.ToPart()))
 			}
 		} else {
 			errs = append(errs, fmt.Errorf("file upload failed: %w", err))
@@ -1014,7 +1014,7 @@ func answerWithVideo(
 			for _, part := range content.Parts {
 				if part.Text != "" {
 					if prompt == nil { // take the first prompt text,
-						prompt = ptr(part.Text)
+						prompt = new(part.Text)
 					}
 				} else if part.FileData != nil {
 					if strings.HasPrefix(part.FileData.MIMEType, "image/") {
@@ -1264,7 +1264,7 @@ func answerWithSpeech(
 			parentFilesToUpload,
 		); err == nil {
 			for _, upload := range uploaded {
-				parts = append(parts, ptr(upload.ToPart()))
+				parts = append(parts, new(upload.ToPart()))
 			}
 		} else {
 			errs = append(errs, fmt.Errorf("file upload failed: %w", err))
