@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand/v2"
 	"strconv"
 	"strings"
 	"time"
@@ -227,36 +228,34 @@ func sendMessage(
 	); res.OK {
 		sentMessageID = res.Result.MessageID
 	} else {
-		err = fmt.Errorf("failed to send message: %s (requested message: %s)", *res.Description, message)
+		err = fmt.Errorf("failed to send message: %s", *res.Description)
 	}
 
 	return sentMessageID, err
 }
 
-// update a message in the chat
-func updateMessage(
+// draft a message in the chat
+func draftMessage(
 	ctxBg context.Context,
 	bot *tg.Bot,
 	conf config,
 	message string,
 	chatID int64,
-	messageID int64,
+	draftID int64,
 ) (err error) {
 	ctx, cancel := context.WithTimeout(ctxBg, ignorableRequestTimeoutSeconds*time.Second)
 	defer cancel()
 	_, _ = bot.SendChatAction(ctx, chatID, tg.ChatActionTyping, nil)
 
 	if conf.Verbose {
-		log.Printf("[verbose] updating message in chat(%d): '%s'", chatID, message)
+		log.Printf("[verbose] sending message draft to chat(%d): '%s'", chatID, message)
 	}
 
-	ctxEdit, cancelEdit := context.WithTimeout(ctxBg, requestTimeoutSeconds*time.Second)
-	defer cancelEdit()
-	options := tg.OptionsEditMessageText{}.
-		SetIDs(chatID, messageID)
+	ctxDraft, cancelDraft := context.WithTimeout(ctxBg, requestTimeoutSeconds*time.Second)
+	defer cancelDraft()
 
-	if res, _ := bot.EditMessageText(ctxEdit, message, options); !res.OK {
-		err = fmt.Errorf("failed to send message: %s (requested message: %s)", *res.Description, message)
+	if res, _ := bot.SendMessageDraft(ctxDraft, chatID, draftID, message, tg.OptionsSendMessageDraft{}); !res.OK {
+		err = fmt.Errorf("failed to send message draft: %s", *res.Description)
 	}
 
 	return err
@@ -492,11 +491,12 @@ func answer(
 		prompts,
 		history,
 	); err == nil {
+		draftID := rand.Int64()
+
 		// generate
 		ctxGenerate, cancelGenerate := context.WithTimeout(ctxBg, time.Duration(conf.AnswerTimeoutSeconds)*time.Second)
 		defer cancelGenerate()
-		var firstMessageID *int64 = nil
-		mergedText := ""
+		var mergedText strings.Builder
 		for it, err := range gtc.GenerateStreamIterated(
 			ctxGenerate,
 			contents,
@@ -514,67 +514,49 @@ func answer(
 						for _, part := range candidate.Content.Parts {
 							// check stream content
 							if part.Text != "" {
-								generatedText := part.Text
-								mergedText += generatedText
+								mergedText.WriteString(part.Text)
 
-								if firstMessageID == nil { // send the first message
-									if sentMessageID, err := sendMessage(
-										ctxBg,
-										bot,
-										conf,
-										generatedText,
-										chatID,
-										&messageID,
-									); err == nil {
-										firstMessageID = &sentMessageID
-									} else {
-										errs = append(errs, fmt.Errorf("failed to send message: %w", err))
-									}
-								} else { // update the first message
-									// update the first message (append text)
-									if err := updateMessage(
-										ctxBg,
-										bot,
-										conf,
-										mergedText,
-										chatID,
-										*firstMessageID,
-									); err != nil {
-										errs = append(errs, fmt.Errorf("failed to update message: %w", err))
-									}
+								// draft message
+								if err := draftMessage(
+									ctxBg,
+									bot,
+									conf,
+									mergedText.String(),
+									chatID,
+									draftID,
+								); err != nil {
+									errs = append(errs, fmt.Errorf("failed to draft message: %w", err))
 								}
 							}
 						}
-					} else if candidate.FinishReason != genai.FinishReasonStop {
-						// check finish reason
-						generatedText := fmt.Sprintf("<<<%s>>>", candidate.FinishReason)
-						mergedText += generatedText
+					}
 
-						if firstMessageID == nil { // send the first message
-							if sentMessageID, err := sendMessage(
-								ctxBg,
-								bot,
-								conf,
-								generatedText,
-								chatID,
-								&messageID,
-							); err == nil {
-								firstMessageID = &sentMessageID
-							} else {
-								errs = append(errs, fmt.Errorf("failed to send message: %w", err))
-							}
-						} else { // update the first message
-							// update the first message (append text)
-							if err := updateMessage(
-								ctxBg,
-								bot,
-								conf,
-								mergedText,
-								chatID,
-								*firstMessageID,
-							); err != nil {
-								errs = append(errs, fmt.Errorf("failed to update message: %w", err))
-							}
+					if candidate.FinishReason == genai.FinishReasonStop {
+						// finalize the message
+						if _, err := sendMessage(
+							ctxBg,
+							bot,
+							conf,
+							mergedText.String(),
+							chatID,
+							nil,
+						); err != nil {
+							errs = append(errs, fmt.Errorf("failed to finalize message: %w", err))
+						}
+					} else if candidate.FinishReason != "" {
+						// check finish reason
+						fmt.Fprintf(&mergedText, "<<<%s>>>", candidate.FinishReason)
+
+						// finalize the message with the finish reason
+						if _, err := sendMessage(
+							ctxBg,
+							bot,
+							conf,
+							mergedText.String(),
+							chatID,
+							nil,
+						); err != nil {
+							errs = append(errs, fmt.Errorf("failed to finalize message: %w", err))
 						}
 					}
 
@@ -593,21 +575,19 @@ func answer(
 
 		// log if it was successful or not
 		successful := (func() bool {
-			if firstMessageID != nil {
-				// leave a reaction on the message for notifying the termination of the stream
-				ctxReaction, cancelReaction := context.WithTimeout(ctxBg, requestTimeoutSeconds*time.Second)
-				defer cancelReaction()
-				if result, _ := bot.SetMessageReaction(
-					ctxReaction,
-					chatID,
-					messageID,
-					tg.NewMessageReactionWithEmoji("👌"),
-				); !result.OK {
-					errs = append(errs, fmt.Errorf("failed to set message reaction: %s", *result.Description))
-				}
-				return true
+			// leave a reaction on the message for notifying the termination of the stream
+			ctxReaction, cancelReaction := context.WithTimeout(ctxBg, requestTimeoutSeconds*time.Second)
+			defer cancelReaction()
+			if result, _ := bot.SetMessageReaction(
+				ctxReaction,
+				chatID,
+				messageID,
+				tg.NewMessageReactionWithEmoji("👌"),
+			); !result.OK {
+				errs = append(errs, fmt.Errorf("failed to set message reaction: %s", *result.Description))
 			}
-			return false
+
+			return len(errs) <= 0
 		})()
 		savePromptAndResult(
 			db,
@@ -616,7 +596,7 @@ func answer(
 			username,
 			messagesToPrompt(parent, original),
 			uint(numTokensInput),
-			mergedText,
+			mergedText.String(),
 			uint(numTokensOutput),
 			successful,
 		)
