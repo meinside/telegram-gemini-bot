@@ -26,7 +26,7 @@ const (
 	defaultGenerativeModel                    = `gemini-3-flash-preview`
 	defaultGenerativeModelForImageGeneration  = `gemini-3-pro-image-preview`
 	defaultGenerativeModelForVideoGeneration  = `veo-3.1-fast-generate-preview`
-	defaultGenerativeModelForSpeechGeneration = `gemini-2.5-flash-preview-tts`
+	defaultGenerativeModelForSpeechGeneration = `gemini-3.1-flash-tts-preview`
 
 	// https://ai.google.dev/gemini-api/docs/speech-generation#voices
 	defaultGenerativeModelForSpeechGenerationVoice = `Kore`
