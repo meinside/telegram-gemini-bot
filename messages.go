@@ -214,7 +214,7 @@ func sendMessage(
 	options := tg.OptionsSendMessage{}
 	if messageID != nil {
 		options.SetReplyParameters(tg.ReplyParameters{
-			MessageID: *messageID,
+			MessageID: messageID,
 		})
 	}
 
@@ -283,7 +283,7 @@ func sendPhoto(
 	options := tg.OptionsSendPhoto{}
 	if messageID != nil {
 		options.SetReplyParameters(tg.ReplyParameters{
-			MessageID: *messageID,
+			MessageID: messageID,
 		})
 	}
 	if res, _ := bot.SendPhoto(
@@ -322,7 +322,7 @@ func sendVideo(
 	options := tg.OptionsSendVideo{}
 	if messageID != nil {
 		options.SetReplyParameters(tg.ReplyParameters{
-			MessageID: *messageID,
+			MessageID: messageID,
 		})
 	}
 	if res, _ := bot.SendVideo(
@@ -361,7 +361,7 @@ func sendVoice(
 	options := tg.OptionsSendVoice{}
 	if messageID != nil {
 		options.SetReplyParameters(tg.ReplyParameters{
-			MessageID: *messageID,
+			MessageID: messageID,
 		})
 	}
 	if res, _ := bot.SendVoice(
