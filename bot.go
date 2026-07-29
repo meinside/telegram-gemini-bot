@@ -23,9 +23,9 @@ import (
 
 // constants for default values
 const (
-	defaultGenerativeModel                    = `gemini-3-flash-preview`
-	defaultGenerativeModelForImageGeneration  = `gemini-3-pro-image-preview`
-	defaultGenerativeModelForVideoGeneration  = `veo-3.1-fast-generate-preview`
+	defaultGenerativeModel                    = `gemini-3.6-flash`
+	defaultGenerativeModelForImageGeneration  = `gemini-3.1-flash-lite-image`
+	defaultGenerativeModelForVideoGeneration  = `veo-3.1-lite-generate-preview`
 	defaultGenerativeModelForSpeechGeneration = `gemini-3.1-flash-tts-preview`
 
 	// https://ai.google.dev/gemini-api/docs/speech-generation#voices
@@ -382,7 +382,8 @@ func runBot(conf config) {
 
 // generate a default system instruction with given configuration
 func defaultSystemInstruction() string {
-	return fmt.Sprintf(defaultSystemInstructionFormat,
+	return fmt.Sprintf(
+		defaultSystemInstructionFormat,
 		time.Now().Format("2006-01-02 15:04:05 MST (Mon)"),
 	)
 }

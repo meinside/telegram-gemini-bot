@@ -45,10 +45,10 @@ and set your values:
 
 ```json
 {
-  "google_generative_model": "gemini-3.1-pro-preview",
-  "google_generative_model_for_image_generation": "gemini-3-pro-image-preview",
-  "google_generative_model_for_video_generation": "veo-3.1-generate-preview",
-  "google_generative_model_for_speech_generation": "gemini-2.5-flash-preview-tts",
+  "google_generative_model": "gemini-3.6-flash",
+  "google_generative_model_for_image_generation": "gemini-3.1-flash-lite-image",
+  "google_generative_model_for_video_generation": "veo-3.1-lite-generate-preview",
+  "google_generative_model_for_speech_generation": "gemini-3.1-flash-tts-preview",
 
   "allowed_telegram_users": ["user1", "user2"],
   "db_filepath": null,
@@ -70,10 +70,10 @@ You can use [Infisical](https://infisical.com/) for saving & retrieving your bot
 
 ```json
 {
-  "google_generative_model": "gemini-3.1-pro-preview",
-  "google_generative_model_for_image_generation": "gemini-3-pro-image-preview",
-  "google_generative_model_for_video_generation": "veo-3.1-generate-preview",
-  "google_generative_model_for_speech_generation": "gemini-2.5-flash-preview-tts",
+  "google_generative_model": "gemini-3.6-flash",
+  "google_generative_model_for_image_generation": "gemini-3.1-flash-lite-image",
+  "google_generative_model_for_video_generation": "veo-3.1-lite-generate-preview",
+  "google_generative_model_for_speech_generation": "gemini-3.1-flash-tts-preview",
 
   "allowed_telegram_users": ["user1", "user2"],
   "db_filepath": null,
