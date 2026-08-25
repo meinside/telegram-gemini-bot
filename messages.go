@@ -254,7 +254,13 @@ func draftMessage(
 	ctxDraft, cancelDraft := context.WithTimeout(ctxBg, requestTimeoutSeconds*time.Second)
 	defer cancelDraft()
 
-	if res, _ := bot.SendMessageDraft(ctxDraft, chatID, draftID, message, tg.OptionsSendMessageDraft{}); !res.OK {
+	if res, _ := bot.SendMessageDraft(
+		ctxDraft,
+		chatID,
+		draftID,
+		tg.OptionsSendMessageDraft{}.
+			SetText(message),
+	); !res.OK {
 		err = fmt.Errorf("failed to send message draft: %s", *res.Description)
 	}
 
