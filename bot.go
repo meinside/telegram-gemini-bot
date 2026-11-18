@@ -23,10 +23,10 @@ import (
 
 // constants for default values
 const (
-	defaultGenerativeModel                    = `gemini-3.6-flash`
+	defaultGenerativeModel                    = `gemini-3.8-flash`
 	defaultGenerativeModelForImageGeneration  = `gemini-3.1-flash-lite-image`
-	defaultGenerativeModelForVideoGeneration  = `veo-3.1-lite-generate-preview`
-	defaultGenerativeModelForSpeechGeneration = `gemini-3.1-flash-tts-preview`
+	defaultGenerativeModelForVideoGeneration  = `veo-3.1-fast-generate`
+	defaultGenerativeModelForSpeechGeneration = `gemini-3.8-flash-lite-tts`
 
 	// https://ai.google.dev/gemini-api/docs/speech-generation#voices
 	defaultGenerativeModelForSpeechGenerationVoice = `Kore`
