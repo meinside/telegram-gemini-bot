@@ -201,7 +201,7 @@ func runBot(conf config) {
 	ctxInfo, cancelInfo := context.WithTimeout(ctxBg, requestTimeoutSeconds*time.Second)
 	defer cancelInfo()
 	if b, _ := bot.GetMe(ctxInfo); b.OK {
-		log.Printf("launching bot: %s", userName(b.Result))
+		log.Printf("launching bot: %s", botName(b.Result))
 
 		// database
 		var db *Database = nil
