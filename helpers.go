@@ -326,6 +326,15 @@ func wavToOGG(wavBytes []byte) ([]byte, error) {
 	return out.Bytes(), nil
 }
 
+// generate bot's name
+func botName(bot *tg.BotFullInfo) string {
+	if bot.Username != nil {
+		return fmt.Sprintf("@%s (%s)", *bot.Username, bot.FirstName)
+	} else {
+		return bot.FirstName
+	}
+}
+
 // generate user's name
 func userName(user *tg.User) string {
 	if user.Username != nil {
